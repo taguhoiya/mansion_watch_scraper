@@ -11,4 +11,4 @@ from itemadapter import ItemAdapter
 class MansionWatchScraperPipeline:
     def process_item(self, item, spider):
         return item
-   
+    
