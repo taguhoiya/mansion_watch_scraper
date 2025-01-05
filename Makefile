@@ -13,3 +13,7 @@ format: ## Format the code.
 .PHONY: deploy
 deploy: ## Deploy the application to Heroku.
 	gcloud app deploy
+
+.PHONY: pipi
+pipi: ## Install the dependencies.
+	pip install -r requirements.txt
