@@ -1,0 +1,59 @@
+name: CI Checks
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip" # caching pip dependencies
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Sort imports
+        run: isort .
+
+      - name: Lint with black
+        run: black .
+
+      - name: Lint with flake8
+        run: flake8 .
+
+  # deploy:
+  #   if: github.ref == 'refs/heads/main'
+  #   needs: lint
+  #   runs-on: ubuntu-latest
+
+  #   steps:
+  #     - uses: actions/checkout@v4
+
+  #     - name: Authenticate to Google Cloud
+  #       uses: google-github-actions/auth@v2
+  #       with:
+  #         project_id: ${{ secrets.GCP_PROJECT }}
+  #         workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+  #         service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+  # TODO: Uncomment the following lines to deploy to Google App Engine
+  # - name: Deploy to Google App Engine
+  #   uses: 'google-github-actions/deploy-appengine@v2'
+  #   with:
+  #     project_id: ${{ secrets.GCP_PROJECT }}
+  #     deliverables: app.yaml
