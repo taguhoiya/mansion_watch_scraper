@@ -3,3 +3,5 @@ flake8
 black
 isort
 pre-commit
+scrapyd
+scrapyd-client
