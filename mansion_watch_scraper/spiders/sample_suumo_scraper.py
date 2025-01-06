@@ -3,8 +3,8 @@ import scrapy
 from enums.keys import Keys
 
 
-class ScraperSpider(scrapy.Spider):
-    name = "mantion_watch_scraper"
+class MansionWatchSpider(scrapy.Spider):
+    name = "mansion_watch_scraper"
     allowed_domains = ["suumo.jp"]
     start_urls = ["https://suumo.jp/ms/chuko/tokyo/sc_meguro/nc_75709932/"]
 
