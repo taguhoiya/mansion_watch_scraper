@@ -17,3 +17,8 @@ deploy: ## Deploy the application to Heroku.
 .PHONY: pipi
 pipi: ## Install the dependencies.
 	pip install -r requirements.txt
+
+# TODO: Tweak this to work with a proper file
+.PHONY: scrape
+scrape: ## Run the scraper.
+	scrapy runspider sample_scraper.py
