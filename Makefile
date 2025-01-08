@@ -21,4 +21,4 @@ pipi: ## Install the dependencies.
 # TODO: Tweak this to work with a proper file
 .PHONY: scrape
 scrape: ## Run the scraper.
-	scrapy runspider sample_suumo_scraper.py
+	scrapy runspider mansion_watch_scraper/spiders/sample_suumo_scraper.py
