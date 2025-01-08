@@ -6,4 +6,3 @@ pre-commit
 scrapyd
 scrapyd-client
 pymongo
-dotenv
