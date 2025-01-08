@@ -5,3 +5,4 @@ isort
 pre-commit
 scrapyd
 scrapyd-client
+pymongo

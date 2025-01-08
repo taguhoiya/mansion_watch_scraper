@@ -1,10 +1,25 @@
 services:
-  mansion_watch_scraper:
-    build: .
-    container_name: mansion_watch_scraper
+  # mansion_watch_scraper:
+  #   build: .
+  #   container_name: mansion_watch_scraper
+  #   ports:
+  #     - "8080:8080"
+  #   # env_file:
+  #   #   - .env
+  #   volumes:
+  #     - .:/code
+  #   depends_on:
+  #     - mongodb
+
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb
     ports:
-      - "8080:8080"
+      - "27017:27017"
     env_file:
       - .env
     volumes:
-      - .:/code
+      - mongo_data:/data/db
+
+volumes:
+  mongo_data:

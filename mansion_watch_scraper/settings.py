@@ -62,9 +62,10 @@ ROBOTSTXT_OBEY = True
 
 # Configure item pipelines
 # See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
-# ITEM_PIPELINES = {
-#    "mansion_watch_scraper.pipelines.MansionWatchScraperPipeline": 300,
-# }
+ITEM_PIPELINES = {
+    #  "mansion_watch_scraper.pipelines.MansionWatchScraperPipeline": 300,
+    "mansion_watch_scraper.pipelines.MongoPipeline": 300,
+}
 
 # Enable and configure the AutoThrottle extension (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/autothrottle.html
@@ -96,3 +97,7 @@ CLOSESPIDER_PAGECOUNT = 10
 
 # Set the maximum number of concurrent requests per domain
 CONCURRENT_REQUESTS_PER_DOMAIN = 4
+
+# Set mongo db settings
+MONGO_URI = "mongodb://localhost:27017"
+MONGO_DATABASE = "mansion_watch"
