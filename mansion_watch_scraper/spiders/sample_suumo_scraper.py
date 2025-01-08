@@ -9,56 +9,52 @@ class MansionWatchSpider(scrapy.Spider):
     start_urls = ["https://suumo.jp/ms/chuko/tokyo/sc_meguro/nc_75709932/"]
 
     def parse(self, response):
-        property_name = response.xpath(
-            'normalize-space(//*[@id="mainContents"]/div[5]/div[1]/div[1]/div/h3/text())'
-        ).get()
-        print("property_name", property_name)
+        property_name = (
+            response.xpath(
+                'normalize-space(//*[@id="mainContents"]/div[4]/div[1]/div[1]/div/h3/text())'
+            )
+            .get()
+            .replace("\u3000", " ")
+        )
+        property_dict = {
+            "property_name": property_name,
+        }
+        print(property_name)
 
         # 物件概要
         property_overview = response.xpath(
-            '//*[@id="mainContents"]/div[5]/div[1]/div[1]/table/tbody'
+            '//*[@id="mainContents"]/div[4]/div[1]/div[1]/table/tbody/tr'
         )
 
-        property_overview_items = []
+        property_overview_dict = {}
         for property_overview_item in property_overview:
-            i = 0
-
             keys = property_overview_item.xpath("th/div/text()").getall()
             normalized_keys = [key.strip() for key in keys if key.strip()]
 
             values = property_overview_item.xpath("td/text()").getall()
             normalized_values = [value.strip() for value in values if value.strip()]
 
-            while i < len(normalized_keys):
-                key = normalized_keys[i]
-                value = normalized_values[i] if i < len(normalized_values) else None
-                property_overview_items.append({key: value})
-                i += 1
+            for key, value in zip(normalized_keys, normalized_values):
+                property_overview_dict[key] = value
 
         # 共通概要
         common_overview = response.xpath(
-            '//*[@id="mainContents"]/div[5]/div[1]/div[2]/table/tbody/tr'
+            '//*[@id="mainContents"]/div[4]/div[1]/div[2]/table/tbody/tr'
         )
 
-        common_overview_items = []
+        common_overview_dict = {}
         for common_overview_item in common_overview:
-            i = 0
-
             keys = common_overview_item.xpath("th/div/text()").getall()
             normalized_keys = [key.strip() for key in keys if key.strip()]
 
             values = common_overview_item.xpath("td/text()").getall()
             normalized_values = [value.strip() for value in values if value.strip()]
-            print("normalized_values", normalized_values)
 
-            while i < len(normalized_keys):
-                key = normalized_keys[i]
+            for key, value in zip(normalized_keys, normalized_values):
                 if key == Keys.TRAFFIC.value:
-                    value = normalized_values[i:]
+                    common_overview_dict[key] = normalized_values
                 else:
-                    value = normalized_values[i] if i < len(normalized_values) else None
-                common_overview_items.append({key: value})
-                i += 1
+                    common_overview_dict[key] = value
 
         # TODO: 会社概要
         # company_overview = response.xpath('//*[@id="mainContents"]/div[5]/div[1]/div[3]/table/tbody/tr')
@@ -66,6 +62,12 @@ class MansionWatchSpider(scrapy.Spider):
         # company_overview_items = []
         # for company_overview_item in company_overview:
         #     i = 0
+
+        yield {
+            "properties": property_dict,
+            "property_overviews": property_overview_dict,
+            "common_overviews": common_overview_dict,
+        }
 
 
 # class ScraperSpide(CrawlSpider):
