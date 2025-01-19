@@ -4,10 +4,12 @@ WORKDIR /app
 
 COPY requirements.txt .
 
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install -r requirements.txt
 
 COPY . .
 
 ENV PYTHONUNBUFFERED=1
 
-CMD ["scrapy", "runspider", "mansion_watch_scraper/spiders/mansion_watch_spider.py"]
+EXPOSE 8080
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]
