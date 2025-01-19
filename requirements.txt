@@ -6,3 +6,7 @@ pre-commit
 scrapyd
 scrapyd-client
 pymongo
+fastapi
+uvicorn
+pydantic
+pydantic_settings

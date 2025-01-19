@@ -14,11 +14,11 @@ format: ## Format the code.
 deploy: ## Deploy the application to Heroku.
 	gcloud app deploy
 
-.PHONY: pipi
-pipi: ## Install the dependencies.
+.PHONY: pip
+pip: ## Install the dependencies.
 	pip install -r requirements.txt
 
 # TODO: Tweak this to work with a proper file
 .PHONY: scrape
 scrape: ## Run the scraper.
-	scrapy runspider mansion_watch_scraper/spiders/sample_suumo_scraper.py
+	scrapy runspider mansion_watch_scraper/spiders/suumo_scraper.py -a url="https://suumo.jp/ms/chuko/tokyo/sc_meguro/nc_75709932/"
