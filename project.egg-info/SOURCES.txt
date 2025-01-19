@@ -8,7 +8,7 @@ mansion_watch_scraper/middlewares.py
 mansion_watch_scraper/pipelines.py
 mansion_watch_scraper/settings.py
 mansion_watch_scraper/spiders/__init__.py
-mansion_watch_scraper/spiders/sample_suumo_scraper.py
+mansion_watch_scraper/spiders/suumo_scraper.py
 project.egg-info/PKG-INFO
 project.egg-info/SOURCES.txt
 project.egg-info/dependency_links.txt
