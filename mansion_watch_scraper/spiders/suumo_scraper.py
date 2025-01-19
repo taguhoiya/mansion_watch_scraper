@@ -1,14 +1,53 @@
 import scrapy
+from scrapy.spidermiddlewares.httperror import HttpError
+from twisted.internet.error import DNSLookupError, TCPTimedOutError, TimeoutError
 
+from app.services.date import get_current_time
 from enums.keys import Keys
 
 
 class MansionWatchSpider(scrapy.Spider):
     name = "mansion_watch_scraper"
     allowed_domains = ["suumo.jp"]
-    start_urls = ["https://suumo.jp/ms/chuko/tokyo/sc_meguro/nc_75709932/"]
+
+    def __init__(self, url=None, *args, **kwargs):
+        super(MansionWatchSpider, self).__init__(*args, **kwargs)
+        if url is not None:
+            self.start_urls = [url]
+        else:
+            raise ValueError("Argument 'url' is required")
+
+    # Ref: https://docs.scrapy.org/en/latest/topics/request-response.html#topics-request-response-ref-errbacks
+    def start_requests(self):
+        for url in self.start_urls:
+            yield scrapy.Request(
+                url=url,
+                callback=self.parse,
+                errback=self.errback_httpbin,
+            )
+
+    def errback_httpbin(self, failure):
+        # log all failures
+        self.logger.error(repr(failure))
+
+        if failure.check(HttpError):
+            # these exceptions come from HttpError spider middleware
+            # you can get the non-200 response
+            response = failure.value.response
+            self.logger.error("HttpError on %s", response.url)
+
+        elif failure.check(DNSLookupError):
+            # this is the original request
+            request = failure.request
+            self.logger.error("DNSLookupError on %s", request.url)
+
+        elif failure.check(TimeoutError, TCPTimedOutError):
+            request = failure.request
+            self.logger.error("TimeoutError on %s", request.url)
 
     def parse(self, response):
+        self.logger.info("Got successful response from {}".format(response.url))
+
         property_name = (
             response.xpath(
                 'normalize-space(//*[@id="mainContents"]/div[4]/div[1]/div[1]/div/h3/text())'
@@ -18,8 +57,9 @@ class MansionWatchSpider(scrapy.Spider):
         )
         property_dict = {
             "property_name": property_name,
+            "created_at": get_current_time(),
+            "updated_at": get_current_time(),
         }
-        print(property_name)
 
         # 物件概要
         property_overview = response.xpath(
@@ -36,6 +76,8 @@ class MansionWatchSpider(scrapy.Spider):
 
             for key, value in zip(normalized_keys, normalized_values):
                 property_overview_dict[key] = value
+        property_overview_dict["created_at"] = get_current_time()
+        property_overview_dict["updated_at"] = get_current_time()
 
         # 共通概要
         common_overview = response.xpath(
@@ -55,44 +97,14 @@ class MansionWatchSpider(scrapy.Spider):
                     common_overview_dict[key] = normalized_values
                 else:
                     common_overview_dict[key] = value
+        common_overview_dict["created_at"] = get_current_time()
+        common_overview_dict["updated_at"] = get_current_time()
 
-        # TODO: 会社概要
-        # company_overview = response.xpath('//*[@id="mainContents"]/div[5]/div[1]/div[3]/table/tbody/tr')
-
-        # company_overview_items = []
-        # for company_overview_item in company_overview:
-        #     i = 0
-
-        yield {
+        output = {
             "properties": property_dict,
             "property_overviews": property_overview_dict,
             "common_overviews": common_overview_dict,
         }
+        print(output)
 
-
-# class ScraperSpide(CrawlSpider):
-#     name = "scraper"
-#     allowed_domains = ["www.scrapingcourse.com"]
-#     start_urls = ["https://www.scrapingcourse.com/ecommerce/"]
-
-#     # crawling only the pagination pages, which have the
-#     # "https://www.scrapingcourse.com/ecommerce/page/<number>/" format
-#     rules = (Rule(LinkExtractor(allow=r"page/\d+/"), callback="parse", follow=True),)
-
-#     def parse(self, response):
-#         # get all HTML product elements
-#         products = response.css("li.product")
-#         # iterate over the list of products
-#         for product in products:
-#             # since the price elements contain several
-#             # text nodes
-#             price_text_elements = product.css(".price *::text").getall()
-#             price = "".join(price_text_elements)
-
-#             # return a generator for the scraped item
-#             yield {
-#                 "Url": product.css("a").attrib["href"],
-#                 "Image": product.css("img").attrib["src"],
-#                 "Name": product.css("h2::text").get(),
-#                 "Price": price,
-#             }
+        yield output

@@ -4,6 +4,8 @@
 # See: https://docs.scrapy.org/en/latest/topics/item-pipeline.html
 
 
+import logging
+
 import pymongo
 from itemadapter import ItemAdapter
 
@@ -18,6 +20,7 @@ class MongoPipeline:
     def __init__(self, mongo_uri, mongo_db):
         self.mongo_uri = mongo_uri
         self.mongo_db = mongo_db
+        self.logger = logging.getLogger(__name__)
 
     @classmethod
     def from_crawler(cls, crawler):
@@ -27,6 +30,7 @@ class MongoPipeline:
         )
 
     def open_spider(self, spider):
+        self.logger.info("Opening MongoDB connection")
         self.client = pymongo.MongoClient(self.mongo_uri)
         self.db = self.client[self.mongo_db]
 
@@ -34,6 +38,8 @@ class MongoPipeline:
         self.client.close()
 
     def process_item(self, item, spider):
+        self.logger.info(f"Processing item: {item}")
+
         if "properties" in item:
             self.db["properties"].insert_one(ItemAdapter(item["properties"]).asdict())
         if "property_overviews" in item:

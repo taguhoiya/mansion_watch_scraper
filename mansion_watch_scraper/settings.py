@@ -1,3 +1,5 @@
+import os
+
 # Scrapy settings for mansion_watch_scraper project
 #
 # For simplicity, this file contains only settings considered important or
@@ -99,5 +101,16 @@ CLOSESPIDER_PAGECOUNT = 10
 CONCURRENT_REQUESTS_PER_DOMAIN = 4
 
 # Set mongo db settings
-MONGO_URI = "mongodb://localhost:27017"
+# Change the value of MONGO_URI to "mongodb://localhost:27017" if you are running the MongoDB server locally
+# TODO: Change the value of MONGO_URI after deploying the MongoDB server
 MONGO_DATABASE = "mansion_watch"
+
+if os.getenv("ENV") == "production":
+    MONGO_URI = "mongodb://production_mongodb:27017"
+    LOG_LEVEL = "INFO"
+elif os.getenv("ENV") == "development":
+    MONGO_URI = "mongodb://localhost:27017"
+    LOG_LEVEL = "DEBUG"
+elif os.getenv("ENV") == "docker":
+    MONGO_URI = "mongodb://mongodb:27017"
+    LOG_LEVEL = "DEBUG"
