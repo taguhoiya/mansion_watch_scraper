@@ -48,23 +48,22 @@ class MansionWatchSpider(scrapy.Spider):
     def parse(self, response):
         self.logger.info("Got successful response from {}".format(response.url))
 
-        property_name = (
-            response.xpath(
-                'normalize-space(//*[@id="mainContents"]/div[4]/div[1]/div[1]/div/h3/text())'
-            )
-            .get()
-            .replace("\u3000", " ")
+        # Use this type of xpath to get the target element because the number of elements often changes.
+        property_name_xpath = (
+            'normalize-space(//tr[th/div[contains(text(), "物件名")]]/td)'
         )
+        property_name = response.xpath(property_name_xpath).get()
         property_dict = {
             "property_name": property_name,
+            "url": response.url,
             "created_at": get_current_time(),
             "updated_at": get_current_time(),
         }
 
         # 物件概要
-        property_overview = response.xpath(
-            '//*[@id="mainContents"]/div[4]/div[1]/div[1]/table/tbody/tr'
-        )
+        # Use this type of xpath to get the target element because the number of elements often changes.
+        property_overview_xpath = f'//div[@class="secTitleOuterR"]/h3[@class="secTitleInnerR" and contains(text(), "{property_name} 　【マンション】")]/ancestor::div[@class="secTitleOuterR"]/following-sibling::table/tbody/tr'
+        property_overview = response.xpath(property_overview_xpath)
 
         property_overview_dict = {}
         for property_overview_item in property_overview:
@@ -80,9 +79,9 @@ class MansionWatchSpider(scrapy.Spider):
         property_overview_dict["updated_at"] = get_current_time()
 
         # 共通概要
-        common_overview = response.xpath(
-            '//*[@id="mainContents"]/div[4]/div[1]/div[2]/table/tbody/tr'
-        )
+        # Use this type of xpath to get the target element because the number of elements often changes.
+        common_overview_xpath = '//div[@class="secTitleOuterR"]/h3[@class="secTitleInnerR" and contains(text(), "共通概要")]//ancestor::div[@class="secTitleOuterR"]/following-sibling::table/tbody/tr'
+        common_overview = response.xpath(common_overview_xpath)
 
         common_overview_dict = {}
         for common_overview_item in common_overview:
