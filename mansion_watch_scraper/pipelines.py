@@ -38,15 +38,18 @@ class MongoPipeline:
         self.client.close()
 
     def process_item(self, item, spider):
-        self.logger.info(f"Processing item: {item}")
-
         if "properties" in item:
-            self.db["properties"].insert_one(ItemAdapter(item["properties"]).asdict())
+            result = self.db["properties"].insert_one(
+                ItemAdapter(item["properties"]).asdict()
+            )
+            property_id = result.inserted_id
         if "property_overviews" in item:
+            item["property_overviews"]["property_id"] = property_id
             self.db["property_overviews"].insert_one(
                 ItemAdapter(item["property_overviews"]).asdict()
             )
         if "common_overviews" in item:
+            item["common_overviews"]["property_id"] = property_id
             self.db["common_overviews"].insert_one(
                 ItemAdapter(item["common_overviews"]).asdict()
             )
