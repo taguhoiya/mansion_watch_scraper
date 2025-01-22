@@ -3,7 +3,7 @@ from scrapy.spidermiddlewares.httperror import HttpError
 from twisted.internet.error import DNSLookupError, TCPTimedOutError, TimeoutError
 
 from app.services.date import get_current_time
-from enums.keys import Keys
+from enums.html_element_keys import ElementKeys
 
 
 class MansionWatchSpider(scrapy.Spider):
@@ -49,9 +49,7 @@ class MansionWatchSpider(scrapy.Spider):
         self.logger.info("Got successful response from {}".format(response.url))
 
         # Use this type of xpath to get the target element because the number of elements often changes.
-        property_name_xpath = (
-            'normalize-space(//tr[th/div[contains(text(), "物件名")]]/td)'
-        )
+        property_name_xpath = f'normalize-space(//tr[th/div[contains(text(), "{ElementKeys.PROPERTY_NAME.value}")]]/td)'
         property_name = response.xpath(property_name_xpath).get()
         property_dict = {
             "property_name": property_name,
@@ -62,7 +60,7 @@ class MansionWatchSpider(scrapy.Spider):
 
         # 物件概要
         # Use this type of xpath to get the target element because the number of elements often changes.
-        property_overview_xpath = f'//div[@class="secTitleOuterR"]/h3[@class="secTitleInnerR" and contains(text(), "{property_name} 　【マンション】")]/ancestor::div[@class="secTitleOuterR"]/following-sibling::table/tbody/tr'
+        property_overview_xpath = f'//div[@class="secTitleOuterR"]/h3[@class="secTitleInnerR" and contains(text(), "{property_name + ElementKeys.APERTMENT_SUFFIX.value}")]/ancestor::div[@class="secTitleOuterR"]/following-sibling::table/tbody/tr'
         property_overview = response.xpath(property_overview_xpath)
 
         property_overview_dict = {}
@@ -80,7 +78,7 @@ class MansionWatchSpider(scrapy.Spider):
 
         # 共通概要
         # Use this type of xpath to get the target element because the number of elements often changes.
-        common_overview_xpath = '//div[@class="secTitleOuterR"]/h3[@class="secTitleInnerR" and contains(text(), "共通概要")]//ancestor::div[@class="secTitleOuterR"]/following-sibling::table/tbody/tr'
+        common_overview_xpath = f'//div[@class="secTitleOuterR"]/h3[@class="secTitleInnerR" and contains(text(), "{ElementKeys.COMMON_OVERVIEW.value}")]//ancestor::div[@class="secTitleOuterR"]/following-sibling::table/tbody/tr'
         common_overview = response.xpath(common_overview_xpath)
 
         common_overview_dict = {}
@@ -92,7 +90,7 @@ class MansionWatchSpider(scrapy.Spider):
             normalized_values = [value.strip() for value in values if value.strip()]
 
             for key, value in zip(normalized_keys, normalized_values):
-                if key == Keys.TRAFFIC.value:
+                if key == ElementKeys.TRAFFIC.value:
                     common_overview_dict[key] = normalized_values
                 else:
                     common_overview_dict[key] = value
