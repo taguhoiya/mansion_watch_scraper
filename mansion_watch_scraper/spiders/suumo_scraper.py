@@ -2,7 +2,7 @@ import scrapy
 from scrapy.spidermiddlewares.httperror import HttpError
 from twisted.internet.error import DNSLookupError, TCPTimedOutError, TimeoutError
 
-from app.services.date import get_current_time
+from app.services.dates import get_current_time
 from enums.html_element_keys import ElementKeys
 
 
@@ -52,7 +52,7 @@ class MansionWatchSpider(scrapy.Spider):
         property_name_xpath = f'normalize-space(//tr[th/div[contains(text(), "{ElementKeys.PROPERTY_NAME.value}")]]/td)'
         property_name = response.xpath(property_name_xpath).get()
         property_dict = {
-            "property_name": property_name,
+            "name": property_name,
             "url": response.url,
             "created_at": get_current_time(),
             "updated_at": get_current_time(),
