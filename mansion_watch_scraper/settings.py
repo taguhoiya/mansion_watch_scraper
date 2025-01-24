@@ -104,13 +104,5 @@ CONCURRENT_REQUESTS_PER_DOMAIN = 4
 # Change the value of MONGO_URI to "mongodb://localhost:27017" if you are running the MongoDB server locally
 # TODO: Change the value of MONGO_URI after deploying the MongoDB server
 MONGO_DATABASE = "mansion_watch"
-
-if os.getenv("ENV") == "production":
-    MONGO_URI = "mongodb://production_mongodb:27017"
-    LOG_LEVEL = "INFO"
-elif os.getenv("ENV") == "development":
-    MONGO_URI = "mongodb://localhost:27017"
-    LOG_LEVEL = "DEBUG"
-elif os.getenv("ENV") == "docker":
-    MONGO_URI = "mongodb://mongodb:27017"
-    LOG_LEVEL = "DEBUG"
+MONGO_URI = os.getenv("MONGO_URI")
+LOG_LEVEL = os.getenv("LOG_LEVEL")
