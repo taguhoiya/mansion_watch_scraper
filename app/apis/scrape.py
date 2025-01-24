@@ -2,7 +2,6 @@ import subprocess
 
 from fastapi import APIRouter, HTTPException
 
-# Create an APIRouter instance
 router = APIRouter()
 
 
