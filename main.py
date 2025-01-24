@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.apis import api_router
 from app.configs.settings import settings
 
-app = FastAPI(title=settings.PROJECT_NAME)
+app = FastAPI(title=settings.PROJECT_NAME, summary="APIs for Mansion Watch Scraper")
 
 app.add_middleware(
     CORSMiddleware,
