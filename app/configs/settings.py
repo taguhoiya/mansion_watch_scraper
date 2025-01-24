@@ -6,9 +6,9 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Mansion Watch Scraper"
     MONGO_URI: str
     MONGO_DATABASE: str
-    TABLE_PROPERTIES: str
-    TABLE_PROPERTIES_OVERVIEW: str
-    TABLE_COMMON_OVERVIEW: str
+    COLLECTION_PROPERTIES: str
+    COLLECTION_PROPERTY_OVERVIEWS: str
+    COLLECTION_COMMON_OVERVIEWS: str
 
 
 settings = Settings()
