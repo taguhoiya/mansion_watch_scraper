@@ -65,7 +65,6 @@ ROBOTSTXT_OBEY = True
 # Configure item pipelines
 # See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
 ITEM_PIPELINES = {
-    #  "mansion_watch_scraper.pipelines.MansionWatchScraperPipeline": 300,
     "mansion_watch_scraper.pipelines.MongoPipeline": 300,
 }
 
@@ -105,4 +104,6 @@ CONCURRENT_REQUESTS_PER_DOMAIN = 4
 # TODO: Change the value of MONGO_URI after deploying the MongoDB server
 MONGO_DATABASE = "mansion_watch"
 MONGO_URI = os.getenv("MONGO_URI")
-LOG_LEVEL = os.getenv("LOG_LEVEL")
+
+# Set the log level
+LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG")

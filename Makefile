@@ -7,8 +7,8 @@ down: ## Stop the development docker container.
 	docker compose down
 
 .PHONY: lint
-format: ## Format the code.
-	docker compose exec scall-backend isort app && docker compose exec scall-backend black app && docker compose exec scall-backend flake8 app
+lint: ## Format the code.
+	docker compose exec mansion_watch_scraper isort . && docker compose exec mansion_watch_scraper black . && docker compose exec mansion_watch_scraper flake8 .
 
 .PHONY: deploy
 deploy: ## Deploy the application to Heroku.
@@ -21,4 +21,4 @@ pip: ## Install the dependencies.
 # TODO: Tweak this to work with a proper file
 .PHONY: scrape
 scrape: ## Run the scraper.
-	scrapy runspider mansion_watch_scraper/spiders/suumo_scraper.py -a url="https://suumo.jp/ms/chuko/tokyo/sc_meguro/nc_75709932/"
+	@source .env && scrapy runspider mansion_watch_scraper/spiders/suumo_scraper.py -a url="https://suumo.jp/ms/chuko/tokyo/sc_meguro/nc_75709932/"

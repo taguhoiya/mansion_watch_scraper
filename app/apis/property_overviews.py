@@ -1,15 +1,23 @@
 import logging
 import os
+from typing import List
 
 from fastapi import APIRouter, HTTPException
 
 from app.db.session import get_db
+from app.models.property_overview import PropertyOverview
 from app.services.utils import to_json_serializable
 
 router = APIRouter()
 
 
-@router.get("/property_overviews", summary="Get the property overview information")
+@router.get(
+    "/property_overviews",
+    summary="Get the property overview information",
+    response_description="The property overview information",
+    response_model=List[PropertyOverview],
+    response_model_by_alias=False,
+)
 async def get_property_overview():
     """
     Get the property overview information.

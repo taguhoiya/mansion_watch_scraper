@@ -1,15 +1,23 @@
 import logging
 import os
+from typing import List
 
 from fastapi import APIRouter, HTTPException
 
 from app.db.session import get_db
+from app.models.common_overview import CommonOverview
 from app.services.utils import to_json_serializable
 
 router = APIRouter()
 
 
-@router.get("/common_overviews", summary="Get the common overview information")
+@router.get(
+    "/common_overviews",
+    summary="Get the common overview information",
+    response_description="The common overview information",
+    response_model=List[CommonOverview],
+    response_model_by_alias=False,
+)
 async def get_common_overview():
     """
     Get the common overview information.
