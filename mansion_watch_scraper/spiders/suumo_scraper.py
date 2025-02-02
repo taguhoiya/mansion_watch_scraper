@@ -2,7 +2,10 @@ import scrapy
 from scrapy.spidermiddlewares.httperror import HttpError
 from twisted.internet.error import DNSLookupError, TCPTimedOutError, TimeoutError
 
+from app.models.common_overview import COMMON_OVERVIEW_TRANSLATION_MAP
+from app.models.property_overview import PROPERTY_OVERVIEW_TRANSLATION_MAP
 from app.services.dates import get_current_time
+from app.services.utils import translate_keys
 from enums.html_element_keys import ElementKeys
 
 
@@ -58,6 +61,11 @@ class MansionWatchSpider(scrapy.Spider):
             "updated_at": get_current_time(),
         }
 
+        # 物件画像
+        # property_image_xpath = '//*[@id="js-lightbox"]/li/div/a/@data-src'
+        # image_urls = response.xpath(property_image_xpath).getall()
+        # property_dict["image_urls"] = image_urls
+
         # 物件概要
         # Use this type of xpath to get the target element because the number of elements often changes.
         property_overview_xpath = f'//div[@class="secTitleOuterR"]/h3[@class="secTitleInnerR" and contains(text(), "{property_name + ElementKeys.APERTMENT_SUFFIX.value}")]/ancestor::div[@class="secTitleOuterR"]/following-sibling::table/tbody/tr'
@@ -73,6 +81,9 @@ class MansionWatchSpider(scrapy.Spider):
 
             for key, value in zip(normalized_keys, normalized_values):
                 property_overview_dict[key] = value
+        property_overview_dict = translate_keys(
+            property_overview_dict, PROPERTY_OVERVIEW_TRANSLATION_MAP
+        )
         property_overview_dict["created_at"] = get_current_time()
         property_overview_dict["updated_at"] = get_current_time()
 
@@ -94,6 +105,9 @@ class MansionWatchSpider(scrapy.Spider):
                     common_overview_dict[key] = normalized_values
                 else:
                     common_overview_dict[key] = value
+        common_overview_dict = translate_keys(
+            common_overview_dict, COMMON_OVERVIEW_TRANSLATION_MAP
+        )
         common_overview_dict["created_at"] = get_current_time()
         common_overview_dict["updated_at"] = get_current_time()
 
