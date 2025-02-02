@@ -22,3 +22,7 @@ pip: ## Install the dependencies.
 .PHONY: scrape
 scrape: ## Run the scraper.
 	@source .env && scrapy runspider mansion_watch_scraper/spiders/suumo_scraper.py -a url="https://suumo.jp/ms/chuko/tokyo/sc_meguro/nc_75709932/"
+
+.PHONY: ngrok
+ngrok: ## Start ngrok.
+	ngrok http http://localhost:8080
