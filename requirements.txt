@@ -11,3 +11,9 @@ uvicorn
 pydantic
 pydantic_settings
 motor
+Pillow
+line-bot-sdk
+
+# for local development
+ngrok
+loguru
