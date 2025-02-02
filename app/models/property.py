@@ -23,7 +23,7 @@ class Property(BaseModel):
 
     class Config:
         arbitrary_types_allowed = True
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "name": "クレヴィア渋谷富ヶ谷",
                 "url": "https://suumo.jp/ms/chuko/tokyo/sc_shibuya/nc_76483805/",

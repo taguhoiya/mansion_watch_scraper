@@ -45,8 +45,16 @@ class PropertyOverview(BaseModel):
     最多価格帯: str = Field(..., title="the highest price range")
     価格: str = Field(..., title="the price of the property")
     管理費: str = Field(..., title="the management fee of the property")
-    修繕積立金: str = Field(..., title="the repair reserve fund of the property")
-    修繕積立基金: str = Field(..., title="the repair reserve fund of the property")
+    # The difference between 修繕積立金 and 修繕積立基金 is explained in https://suumo.jp/article/oyakudachi/oyaku/ms_shinchiku/ms_money/ms_shuzentsumitatekikin/
+    # 修繕積立金: 建物の外壁やエントランス、屋上などの共用部分を維持し、修繕するために行われる「大規模修繕」などに必要な資金
+    # 修繕積立基金: 第一回の大規模修繕工事に充てるためのお金
+    修繕積立金: str = Field(
+        ...,
+        title="the fund required for “major repairs” and other necessary repairs to maintain and repair common areas such as building exterior walls, entrances, rooftops, etc.",
+    )
+    修繕積立基金: str = Field(
+        ..., title="the money to be used for the first major repair work"
+    )
     諸費用: str = Field(..., title="the other expenses of the property")
     間取り: str = Field(..., title="the floor plan of the property")
     専有面積: str = Field(..., title="the area of the property")
@@ -85,7 +93,7 @@ class PropertyOverview(BaseModel):
     property_id: PyObjectId = Field(..., title="the id of the property")
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "販売スケジュール": "-",
                 "イベント情報": "-",
@@ -114,3 +122,29 @@ class PropertyOverview(BaseModel):
                 "property_id": "6790f0aa68873b21a872d2a7",
             }
         }
+
+
+PROPERTY_OVERVIEW_TRANSLATION_MAP = {
+    "販売スケジュール": "sales_schedule",
+    "イベント情報": "event_information",
+    "販売戸数": "number_of_units_for_sale",
+    "最多価格帯": "highest_price_range",
+    "価格": "price",
+    "管理費": "maintenance_fee",
+    "修繕積立金": "repair_reserve_fund",
+    "修繕積立基金": "first_repair_reserve_fund",
+    "諸費用": "other_expenses",
+    "間取り": "floor_plan",
+    "専有面積": "area",
+    "その他面積": "other_area",
+    "引渡可能時期": "delivery_time",
+    "完成時期(築年月)": "completion_time",
+    "所在階": "floor",
+    "向き": "direction",
+    "エネルギー消費性能": "energy_consumption_performance",
+    "断熱性能": "insulation_performance",
+    "目安光熱費": "estimated_utility_cost",
+    "リフォーム": "renovation",
+    "その他制限事項": "other_restrictions",
+    "その他概要・特記事項": "other_overview_and_special_notes",
+}

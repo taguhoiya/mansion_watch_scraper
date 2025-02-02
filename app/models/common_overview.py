@@ -43,7 +43,7 @@ class CommonOverview(BaseModel):
     property_id: PyObjectId = Field(..., title="the id of the property")
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "所在地": "東京都目黒区駒場１",
                 "交通": [
@@ -63,3 +63,15 @@ class CommonOverview(BaseModel):
                 "property_id": "6790f0aa68873b21a872d2a7",
             }
         }
+
+
+COMMON_OVERVIEW_TRANSLATION_MAP = {
+    "所在地": "location",
+    "交通": "transportation",
+    "総戸数": "total_units",
+    "構造・階建て": "structure_floors",
+    "敷地面積": "site_area",
+    "敷地の権利形態": "site_ownership_type",
+    "用途地域": "usage_area",
+    "駐車場": "parking_lot",
+}
