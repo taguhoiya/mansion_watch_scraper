@@ -6,23 +6,22 @@ from pydantic import BaseModel, Field
 from app.models.id import PyObjectId
 
 # {
-#     "_id": {"$oid": "6790f0aa68873b21a872d2a9"},
-#     "所在地": "東京都目黒区駒場１",
-#     "交通": [
+#     "_id": {"$oid": "679f4615b9e24a05799bf4b8"},
+#     "location": "東京都目黒区駒場１",
+#     "transportation": [
 #         "東京都目黒区駒場１",
-#         "京王井の頭線「神泉」歩7分",
-#         "京王井の頭線「駒場東大前」歩8分",
-#         "ＪＲ山手線「渋谷」歩13分",
+#         "京王井の頭線「駒場東大前」歩5分",
+#         "東急田園都市線「池尻大橋」歩12分",
 #     ],
-#     "総戸数": "52戸",
-#     "構造・階建て": "RC9階建",
-#     "敷地面積": "-",
-#     "敷地の権利形態": "所有権",
-#     "用途地域": "-",
-#     "駐車場": "空無",
-#     "created_at": {"$date": "2025-01-22T22:20:42.788Z"},
-#     "updated_at": {"$date": "2025-01-22T22:20:42.788Z"},
-#     "property_id": {"$oid": "6790f0aa68873b21a872d2a7"},
+#     "total_units": "6戸",
+#     "structure_floors": "RC3階地下1階建",
+#     "site_area": "-",
+#     "site_ownership_type": "所有権",
+#     "usage_area": "１種中高",
+#     "parking_lot": "無",
+#     "created_at": {"$date": "2025-02-02T19:16:53.123Z"},
+#     "updated_at": {"$date": "2025-02-02T19:16:53.123Z"},
+#     "property_id": {"$oid": "679f4615b9e24a05799bf4b6"},
 # }
 
 
@@ -30,14 +29,16 @@ class CommonOverview(BaseModel):
     id: Optional[PyObjectId] = Field(
         alias="_id", default=None, title="the id of the common overview"
     )
-    所在地: str = Field(..., title="the location of the property")
-    交通: list[str] = Field(..., title="the transportation of the property")
-    総戸数: str = Field(..., title="the total number of units")
-    構造_階建て: str = Field(..., title="the structure and number of floors")
-    敷地面積: str = Field(..., title="the site area")
-    敷地の権利形態: str = Field(..., title="the site ownership form")
-    用途地域: str = Field(..., title="the usage area")
-    駐車場: str = Field(..., title="the parking lot")
+    location: str = Field(..., title="the location of the common overview")
+    transportation: list[str] = Field(
+        ..., title="the transportation of the common overview"
+    )
+    total_units: str = Field(..., title="the total number of units")
+    structure_floors: str = Field(..., title="the structure and number of floors")
+    site_area: str = Field(..., title="the site area")
+    site_ownership_type: str = Field(..., title="the site ownership type")
+    usage_area: str = Field(..., title="the usage area")
+    parking_lot: str = Field(..., title="the parking lot")
     created_at: datetime = Field(..., title="the creation date of the common overview")
     updated_at: datetime = Field(..., title="the update date of the common overview")
     property_id: PyObjectId = Field(..., title="the id of the property")
@@ -45,22 +46,22 @@ class CommonOverview(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
-                "所在地": "東京都目黒区駒場１",
-                "交通": [
+                "id": "679f4615b9e24a05799bf4b8",
+                "location": "東京都目黒区駒場１",
+                "transportation": [
                     "東京都目黒区駒場１",
-                    "京王井の頭線「神泉」歩7分",
-                    "京王井の頭線「駒場東大前」歩8分",
-                    "ＪＲ山手線「渋谷」歩13分",
+                    "京王井の頭線「駒場東大前」歩5分",
+                    "東急田園都市線「池尻大橋」歩12分",
                 ],
-                "総戸数": "52戸",
-                "構造_階建て": "RC9階建",
-                "敷地面積": "-",
-                "敷地の権利形態": "所有権",
-                "用途地域": "-",
-                "駐車場": "空無",
-                "created_at": "2025-01-22T22:20:42.788Z",
-                "updated_at": "2025-01-22T22:20:42.788Z",
-                "property_id": "6790f0aa68873b21a872d2a7",
+                "total_units": "6戸",
+                "structure_floors": "RC3階地下1階建",
+                "site_area": "-",
+                "site_ownership_type": "所有権",
+                "usage_area": "１種中高",
+                "parking_lot": "無",
+                "created_at": "2025-02-02T19:16:53.123Z",
+                "updated_at": "2025-02-02T19:16:53.123Z",
+                "property_id": "679f4615b9e24a05799bf4b6",
             }
         }
 
