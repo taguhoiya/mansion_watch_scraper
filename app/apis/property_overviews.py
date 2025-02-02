@@ -9,6 +9,7 @@ from app.models.property_overview import PropertyOverview
 from app.services.utils import to_json_serializable
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get(
