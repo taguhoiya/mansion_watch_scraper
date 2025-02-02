@@ -20,11 +20,6 @@ property_overviews = os.getenv("COLLECTION_PROPERTY_OVERVIEWS")
 common_overviews = os.getenv("COLLECTION_COMMON_OVERVIEWS")
 
 
-class MansionWatchScraperPipeline:
-    def process_item(self, item, spider):
-        return item
-
-
 class MongoPipeline:
     def __init__(self, mongo_uri, mongo_db):
         self.mongo_uri = mongo_uri
