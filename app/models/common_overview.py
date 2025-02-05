@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.models.id import PyObjectId
 
@@ -42,6 +42,16 @@ class CommonOverview(BaseModel):
     created_at: datetime = Field(..., title="the creation date of the common overview")
     updated_at: datetime = Field(..., title="the update date of the common overview")
     property_id: PyObjectId = Field(..., title="the id of the property")
+
+    @field_validator("id", "property_id")
+    def validate_object_id(cls, v):
+        return PyObjectId(v)
+
+    @field_validator("created_at", "updated_at")
+    def validate_timestamps(cls, created_at, updated_at):
+        if created_at and updated_at < created_at:
+            raise ValueError("updated_at must be equal to or later than created_at")
+        return updated_at
 
     class Config:
         json_schema_extra = {

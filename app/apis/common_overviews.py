@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
     response_model=List[CommonOverview],
     response_model_by_alias=False,
 )
-async def get_common_overview(user_id: str):
+async def get_common_overview(line_user_id: str):
     """
     Get the common overview information.
     """
@@ -27,9 +27,9 @@ async def get_common_overview(user_id: str):
     try:
         db = get_db()
         collection_common_overviews = db[os.getenv("COLLECTION_COMMON_OVERVIEWS")]
-        for common_overview in await collection_common_overviews.find(user_id).to_list(
-            length=100
-        ):
+        for common_overview in await collection_common_overviews.find(
+            line_user_id
+        ).to_list(length=100):
             common_overview["_id"] = str(common_overview["_id"])
             common_overviews.append(to_json_serializable(common_overview))
     except Exception as e:

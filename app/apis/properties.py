@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
     response_model=List[Property],
     response_model_by_alias=False,
 )
-async def get_property(user_id: str):
+async def get_property(line_user_id: str):
     """
     Get the property information.
     """
@@ -27,9 +27,9 @@ async def get_property(user_id: str):
     try:
         db = get_db()
         collection_prop = db[os.getenv("COLLECTION_PROPERTIES")]
-        for property in await collection_prop.find({"user_id": user_id}).to_list(
-            length=100
-        ):
+        for property in await collection_prop.find(
+            {"line_user_id": line_user_id}
+        ).to_list(length=100):
             property["_id"] = str(property["_id"])
             properties.append(to_json_serializable(property))
     except Exception as e:
