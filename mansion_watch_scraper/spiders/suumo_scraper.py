@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 import scrapy
 from scrapy.spidermiddlewares.httperror import HttpError
 from twisted.internet.error import DNSLookupError, TCPTimedOutError, TimeoutError
@@ -13,12 +15,16 @@ class MansionWatchSpider(scrapy.Spider):
     name = "mansion_watch_scraper"
     allowed_domains = ["suumo.jp"]
 
-    def __init__(self, url=None, *args, **kwargs):
+    def __init__(self, url=None, line_user_id=None, *args, **kwargs):
         super(MansionWatchSpider, self).__init__(*args, **kwargs)
         if url is not None:
             self.start_urls = [url]
-        else:
-            raise ValueError("Argument 'url' is required")
+        if line_user_id is not None:
+            self.line_user_id = line_user_id
+        if not line_user_id or not url:
+            raise ValueError(
+                f"Both url and line_user_id are required. url: {url}, line_user_id: {line_user_id}"
+            )
 
     # Ref: https://docs.scrapy.org/en/latest/topics/request-response.html#topics-request-response-ref-errbacks
     def start_requests(self):
@@ -49,73 +55,71 @@ class MansionWatchSpider(scrapy.Spider):
             self.logger.error("TimeoutError on %s", request.url)
 
     def parse(self, response):
-        self.logger.info("Got successful response from {}".format(response.url))
+        self.logger.info("Successful response from %s", response.url)
+        current_time = get_current_time()
 
-        # Use this type of xpath to get the target element because the number of elements often changes.
+        # Extract property name
         property_name_xpath = f'normalize-space(//tr[th/div[contains(text(), "{ElementKeys.PROPERTY_NAME.value}")]]/td)'
         property_name = response.xpath(property_name_xpath).get()
+
         property_dict = {
             "name": property_name,
             "url": response.url,
-            "created_at": get_current_time(),
-            "updated_at": get_current_time(),
+            "created_at": current_time,
+            "updated_at": current_time,
+        }
+        user_property_dict = {
+            "line_user_id": self.line_user_id,
+            "last_aggregated_at": current_time,  # start update_at
+            "next_aggregated_at": current_time + timedelta(days=3),  # 3 days later
+            "first_succeeded_at": current_time,  # created_at
+            "last_succeeded_at": current_time,  # end update_at
         }
 
-        # 物件画像
-        # property_image_xpath = '//*[@id="js-lightbox"]/li/div/a/@data-src'
-        # image_urls = response.xpath(property_image_xpath).getall()
-        # property_dict["image_urls"] = image_urls
-
-        # 物件概要
-        # Use this type of xpath to get the target element because the number of elements often changes.
+        # Extract property overview details
         property_overview_xpath = f'//div[@class="secTitleOuterR"]/h3[@class="secTitleInnerR" and contains(text(), "{property_name + ElementKeys.APERTMENT_SUFFIX.value}")]/ancestor::div[@class="secTitleOuterR"]/following-sibling::table/tbody/tr'
-        property_overview = response.xpath(property_overview_xpath)
-
+        property_overview_items = response.xpath(property_overview_xpath)
         property_overview_dict = {}
-        for property_overview_item in property_overview:
-            keys = property_overview_item.xpath("th/div/text()").getall()
-            normalized_keys = [key.strip() for key in keys if key.strip()]
+        for item in property_overview_items:
+            keys = [
+                k.strip() for k in item.xpath("th/div/text()").getall() if k.strip()
+            ]
+            values = [v.strip() for v in item.xpath("td/text()").getall() if v.strip()]
+            property_overview_dict.update(dict(zip(keys, values)))
 
-            values = property_overview_item.xpath("td/text()").getall()
-            normalized_values = [value.strip() for value in values if value.strip()]
-
-            for key, value in zip(normalized_keys, normalized_values):
-                property_overview_dict[key] = value
         property_overview_dict = translate_keys(
             property_overview_dict, PROPERTY_OVERVIEW_TRANSLATION_MAP
         )
-        property_overview_dict["created_at"] = get_current_time()
-        property_overview_dict["updated_at"] = get_current_time()
+        property_overview_dict.update(
+            {"created_at": current_time, "updated_at": current_time}
+        )
 
-        # 共通概要
-        # Use this type of xpath to get the target element because the number of elements often changes.
+        # Extract common overview details
         common_overview_xpath = f'//div[@class="secTitleOuterR"]/h3[@class="secTitleInnerR" and contains(text(), "{ElementKeys.COMMON_OVERVIEW.value}")]//ancestor::div[@class="secTitleOuterR"]/following-sibling::table/tbody/tr'
-        common_overview = response.xpath(common_overview_xpath)
-
+        common_overview_items = response.xpath(common_overview_xpath)
         common_overview_dict = {}
-        for common_overview_item in common_overview:
-            keys = common_overview_item.xpath("th/div/text()").getall()
-            normalized_keys = [key.strip() for key in keys if key.strip()]
-
-            values = common_overview_item.xpath("td/text()").getall()
-            normalized_values = [value.strip() for value in values if value.strip()]
-
-            for key, value in zip(normalized_keys, normalized_values):
-                if key == ElementKeys.TRAFFIC.value:
-                    common_overview_dict[key] = normalized_values
+        for item in common_overview_items:
+            keys = [
+                k.strip() for k in item.xpath("th/div/text()").getall() if k.strip()
+            ]
+            values = [v.strip() for v in item.xpath("td/text()").getall() if v.strip()]
+            for k, v in zip(keys, values):
+                if k == ElementKeys.TRAFFIC.value:
+                    common_overview_dict[k] = values
                 else:
-                    common_overview_dict[key] = value
+                    common_overview_dict[k] = v
+
         common_overview_dict = translate_keys(
             common_overview_dict, COMMON_OVERVIEW_TRANSLATION_MAP
         )
-        common_overview_dict["created_at"] = get_current_time()
-        common_overview_dict["updated_at"] = get_current_time()
+        common_overview_dict.update(
+            {"created_at": current_time, "updated_at": current_time}
+        )
 
         output = {
             "properties": property_dict,
+            "user_properties": user_property_dict,
             "property_overviews": property_overview_dict,
             "common_overviews": common_overview_dict,
         }
-        print(output)
-
         yield output

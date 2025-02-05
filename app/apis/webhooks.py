@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 
@@ -8,6 +9,7 @@ from linebot.v3.messaging import TextMessage
 from linebot.v3.webhooks import FollowEvent, MessageEvent
 
 from app.db.session import get_db
+from app.services.dates import get_current_time
 
 router = APIRouter()
 handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
@@ -52,10 +54,23 @@ def handle_text_message(event):
 
 @handler.add(FollowEvent)
 def handle_follow_event(event):
-    user_id = event.source.user_id
-    logging.info(f"New follower: {user_id}")
-    # Save the user_id to the database
+    asyncio.create_task(process_follow_event(event))
+
+
+async def process_follow_event(event):
+    current_time = get_current_time()
+    line_user_id = event.source.user_id
+    logging.info(f"New follower: {line_user_id}")
     db = get_db()
     collection_users = db[os.getenv("COLLECTION_USERS")]
-    if not collection_users.find_one({"user_id": user_id}):
-        collection_users.insert_one({"user_id": user_id})
+    existing = await collection_users.find_one({"line_user_id": line_user_id})
+    if existing:
+        logging.info(f"User already exists: {existing}")
+        return
+    await collection_users.insert_one(
+        {
+            "line_user_id": line_user_id,
+            "created_at": current_time,
+            "updated_at": current_time,
+        }
+    )
