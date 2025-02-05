@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
     response_model=List[PropertyOverview],
     response_model_by_alias=False,
 )
-async def get_property_overview():
+async def get_property_overview(user_id: str):
     """
     Get the property overview information.
     """
@@ -27,7 +27,9 @@ async def get_property_overview():
     try:
         db = get_db()
         collection_prop = db[os.getenv("COLLECTION_PROPERTY_OVERVIEWS")]
-        for property_overview in await collection_prop.find().to_list(length=100):
+        for property_overview in await collection_prop.find(
+            {"user_id": user_id}
+        ).to_list(length=100):
             property_overview["_id"] = str(property_overview["_id"])
             property_overviews.append(to_json_serializable(property_overview))
     except Exception as e:
