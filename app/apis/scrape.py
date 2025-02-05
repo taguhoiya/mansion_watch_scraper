@@ -6,7 +6,7 @@ router = APIRouter()
 
 
 @router.get("/scrape", summary="Scrape the given apartment URL asynchronously")
-async def start_scrapy(url: str, user_id: str):
+async def start_scrapy(url: str, line_user_id: str):
     """
     Scrape the given apartment URL asynchronously using Scrapy.
     url: str: The URL of the apartment to scrape.
@@ -20,7 +20,7 @@ async def start_scrapy(url: str, user_id: str):
             "-a",
             f"url={url}",
             "-a",
-            f"user_id={user_id}",
+            f"line_user_id={line_user_id}",
         ]
 
         # Run Scrapy as a subprocess
