@@ -1,8 +1,8 @@
 import logging
-import os
 from typing import List
 
-from fastapi import APIRouter, HTTPException
+from bson import ObjectId
+from fastapi import APIRouter
 
 from app.db.session import get_db
 from app.models.common_overview import CommonOverview
@@ -19,20 +19,17 @@ logger = logging.getLogger(__name__)
     response_model=List[CommonOverview],
     response_model_by_alias=False,
 )
-async def get_common_overview(line_user_id: str):
+async def get_common_overview(property_id: str):
     """
     Get the common overview information.
     """
+    db = get_db()
+    collection = db["common_overviews"]
+    found = await collection.find({"property_id": ObjectId(property_id)}).to_list(
+        length=100
+    )
     common_overviews = []
-    try:
-        db = get_db()
-        collection_common_overviews = db[os.getenv("COLLECTION_COMMON_OVERVIEWS")]
-        for common_overview in await collection_common_overviews.find(
-            line_user_id
-        ).to_list(length=100):
-            common_overview["_id"] = str(common_overview["_id"])
-            common_overviews.append(to_json_serializable(common_overview))
-    except Exception as e:
-        logging.error(f"Error fetching common overviews: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    for prop in found:
+        prop["_id"] = str(prop["_id"])
+        common_overviews.append(to_json_serializable(prop))
     return common_overviews
