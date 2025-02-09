@@ -1,6 +1,7 @@
 import logging
 from typing import List
 
+from bson import ObjectId
 from fastapi import APIRouter
 
 from app.db.session import get_db
@@ -24,7 +25,9 @@ async def get_common_overview(property_id: str):
     """
     db = get_db()
     collection = db["common_overviews"]
-    found = await collection.find({"property_id": property_id}).to_list(length=100)
+    found = await collection.find({"property_id": ObjectId(property_id)}).to_list(
+        length=100
+    )
     common_overviews = []
     for prop in found:
         prop["_id"] = str(prop["_id"])
