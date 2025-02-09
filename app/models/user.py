@@ -1,6 +1,6 @@
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.id import PyObjectId
 
@@ -20,11 +20,11 @@ class User(BaseModel):
         if not line_user_id.startswith("U"):
             raise ValueError("line_user_id must start with U")
 
-    @field_validator("created_at", "updated_at")
-    def validate_timestamps(cls, created_at, updated_at):
-        if created_at and updated_at < created_at:
+    @model_validator(mode="after")
+    def validate_timestamps(cls, model: "User") -> "User":
+        if model.created_at and model.updated_at < model.created_at:
             raise ValueError("updated_at must be equal to or later than created_at")
-        return updated_at
+        return model
 
     class Config:
         json_schema_extra = {
