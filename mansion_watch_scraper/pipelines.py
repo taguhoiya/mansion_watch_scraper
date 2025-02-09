@@ -10,6 +10,7 @@ from typing import Dict, Union
 
 import pymongo
 from itemadapter import ItemAdapter
+from pymongo.server_api import ServerApi
 
 from app.models.common_overview import CommonOverview
 from app.models.property import Property
@@ -38,7 +39,7 @@ class MongoPipeline:
 
     def open_spider(self, spider):
         self.logger.info("Opening MongoDB connection")
-        self.client = pymongo.MongoClient(self.mongo_uri)
+        self.client = pymongo.MongoClient(self.mongo_uri, server_api=ServerApi("1"))
         self.db = self.client[self.mongo_db]
 
     def close_spider(self, spider):
