@@ -24,10 +24,8 @@ async def get_property_overview(property_id: str):
     Get the property overview information.
     """
     db = get_db()
-    collection = db["property_overviews"]
-    found = await collection.find({"property_id": ObjectId(property_id)}).to_list(
-        length=100
-    )
+    coll = db["property_overviews"]
+    found = await coll.find({"property_id": ObjectId(property_id)}).to_list(length=100)
     property_overviews = []
     for prop in found:
         prop["_id"] = str(prop["_id"])

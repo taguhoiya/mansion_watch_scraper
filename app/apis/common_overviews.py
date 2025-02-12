@@ -24,10 +24,8 @@ async def get_common_overview(property_id: str):
     Get the common overview information.
     """
     db = get_db()
-    collection = db["common_overviews"]
-    found = await collection.find({"property_id": ObjectId(property_id)}).to_list(
-        length=100
-    )
+    coll = db["common_overviews"]
+    found = await coll.find({"property_id": ObjectId(property_id)}).to_list(length=100)
     common_overviews = []
     for prop in found:
         prop["_id"] = str(prop["_id"])

@@ -62,12 +62,12 @@ async def process_follow_event(event):
     line_user_id = event.source.user_id
     logging.info(f"New follower: {line_user_id}")
     db = get_db()
-    collection_users = db[os.getenv("COLLECTION_USERS")]
-    existing = await collection_users.find_one({"line_user_id": line_user_id})
+    coll_users = db[os.getenv("COLLECTION_USERS")]
+    existing = await coll_users.find_one({"line_user_id": line_user_id})
     if existing:
         logging.info(f"User already exists: {existing}")
         return
-    await collection_users.insert_one(
+    await coll_users.insert_one(
         {
             "line_user_id": line_user_id,
             "created_at": current_time,
