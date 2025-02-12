@@ -4,8 +4,13 @@ import scrapy
 from scrapy.spidermiddlewares.httperror import HttpError
 from twisted.internet.error import DNSLookupError, TCPTimedOutError, TimeoutError
 
-from app.models.common_overview import COMMON_OVERVIEW_TRANSLATION_MAP
-from app.models.property_overview import PROPERTY_OVERVIEW_TRANSLATION_MAP
+from app.models.common_overview import COMMON_OVERVIEW_TRANSLATION_MAP, CommonOverview
+from app.models.property import Property
+from app.models.property_overview import (
+    PROPERTY_OVERVIEW_TRANSLATION_MAP,
+    PropertyOverview,
+)
+from app.models.user_property import UserProperty
 from app.services.dates import get_current_time
 from app.services.utils import translate_keys
 from enums.html_element_keys import ElementKeys
@@ -58,17 +63,24 @@ class MansionWatchSpider(scrapy.Spider):
         self.logger.info("Successful response from %s", response.url)
         current_time = get_current_time()
 
-        # Extract property name
+        # Extract a property name to check if the property is available to scrape
         property_name_xpath = f'normalize-space(//tr[th/div[contains(text(), "{ElementKeys.PROPERTY_NAME.value}")]]/td)'
         property_name = response.xpath(property_name_xpath).get()
 
+        property_dict: dict[str, Property] = {}
+        if not property_name:
+            self.logger.warning(
+                f"Property name not found in the response. URL: {response.url}"
+            )
+
         property_dict = {
-            "name": property_name,
+            "name": property_name if property_name else "物件名不明",
             "url": response.url,
+            "is_active": True if property_name else False,
             "created_at": current_time,
             "updated_at": current_time,
         }
-        user_property_dict = {
+        user_property_dict: dict[str, UserProperty] = {
             "line_user_id": self.line_user_id,
             "last_aggregated_at": current_time,  # start update_at
             "next_aggregated_at": current_time + timedelta(days=3),  # 3 days later
@@ -79,7 +91,7 @@ class MansionWatchSpider(scrapy.Spider):
         # Extract property overview details
         property_overview_xpath = f'//div[@class="secTitleOuterR"]/h3[@class="secTitleInnerR" and contains(text(), "{property_name + ElementKeys.APERTMENT_SUFFIX.value}")]/ancestor::div[@class="secTitleOuterR"]/following-sibling::table/tbody/tr'
         property_overview_items = response.xpath(property_overview_xpath)
-        property_overview_dict = {}
+        property_overview_dict: dict[str, PropertyOverview] = {}
         for item in property_overview_items:
             keys = [
                 k.strip() for k in item.xpath("th/div/text()").getall() if k.strip()
@@ -97,7 +109,7 @@ class MansionWatchSpider(scrapy.Spider):
         # Extract common overview details
         common_overview_xpath = f'//div[@class="secTitleOuterR"]/h3[@class="secTitleInnerR" and contains(text(), "{ElementKeys.COMMON_OVERVIEW.value}")]//ancestor::div[@class="secTitleOuterR"]/following-sibling::table/tbody/tr'
         common_overview_items = response.xpath(common_overview_xpath)
-        common_overview_dict = {}
+        common_overview_dict: dict[str, CommonOverview] = {}
         for item in common_overview_items:
             keys = [
                 k.strip() for k in item.xpath("th/div/text()").getall() if k.strip()

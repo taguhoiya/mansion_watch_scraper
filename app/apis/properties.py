@@ -13,14 +13,14 @@ logger = logging.getLogger(__name__)
 
 
 async def _get_properties_by_user_and_url(
-    line_user_id: str, url: str, collection_user_prop, collection_prop
+    line_user_id: str, url: str, coll_user_prop, coll_prop
 ) -> list:
     props = []
-    user_properties = await collection_user_prop.find(
-        {"line_user_id": line_user_id}
-    ).to_list(length=100)
+    user_properties = await coll_user_prop.find({"line_user_id": line_user_id}).to_list(
+        length=100
+    )
     for user_property in user_properties:
-        found = await collection_prop.find(
+        found = await coll_prop.find(
             {"_id": user_property["property_id"], "url": url}
         ).to_list(length=100)
         for prop in found:
@@ -30,25 +30,25 @@ async def _get_properties_by_user_and_url(
 
 
 async def _get_properties_by_user(
-    line_user_id: str, collection_user_prop, collection_prop
-) -> list:
+    line_user_id: str, coll_user_prop, coll_prop
+) -> List[Property]:
     props = []
-    user_properties = await collection_user_prop.find(
-        {"line_user_id": line_user_id}
-    ).to_list(length=100)
+    user_properties = await coll_user_prop.find({"line_user_id": line_user_id}).to_list(
+        length=100
+    )
     for user_property in user_properties:
-        found = await collection_prop.find(
-            {"_id": user_property["property_id"]}
-        ).to_list(length=100)
+        found = await coll_prop.find({"_id": user_property["property_id"]}).to_list(
+            length=100
+        )
         for prop in found:
             prop["_id"] = str(prop["_id"])
             props.append(to_json_serializable(prop))
     return props
 
 
-async def _get_properties_by_url(url: str, collection_prop) -> list:
+async def _get_properties_by_url(url: str, coll_prop) -> list:
     props = []
-    found = await collection_prop.find({"url": url}).to_list(length=100)
+    found = await coll_prop.find({"url": url}).to_list(length=100)
     for prop in found:
         prop["_id"] = str(prop["_id"])
         props.append(to_json_serializable(prop))
@@ -74,19 +74,19 @@ async def get_property(url: str = None, line_user_id: str = None):
 
     try:
         db = get_db()
-        collection_prop = db[os.getenv("COLLECTION_PROPERTIES")]
-        collection_user_prop = db[os.getenv("COLLECTION_USER_PROPERTIES")]
+        coll_prop = db[os.getenv("COLLECTION_PROPERTIES")]
+        coll_user_prop = db[os.getenv("COLLECTION_USER_PROPERTIES")]
 
         if line_user_id and url:
             properties = await _get_properties_by_user_and_url(
-                line_user_id, url, collection_user_prop, collection_prop
+                line_user_id, url, coll_user_prop, coll_prop
             )
         elif line_user_id:
             properties = await _get_properties_by_user(
-                line_user_id, collection_user_prop, collection_prop
+                line_user_id, coll_user_prop, coll_prop
             )
         elif url:
-            properties = await _get_properties_by_url(url, collection_prop)
+            properties = await _get_properties_by_url(url, coll_prop)
         else:
             properties = []
     except Exception as e:

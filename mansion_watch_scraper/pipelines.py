@@ -71,14 +71,14 @@ class MongoPipeline:
     def process_properties(self, item):
         if isinstance(item[properties], dict):
             url = item[properties]["url"]
-            collection = self.db[properties]
+            coll = self.db[properties]
 
             # Check if the property already exists
-            property = collection.find_one({"url": url})
+            property = coll.find_one({"url": url})
             if property:
                 # Remove created_at field to avoid updating it
                 item[properties].pop("created_at", None)
-                result = collection.update_one(
+                result = coll.update_one(
                     {"created_at": property["created_at"]},
                     {"$set": item[properties]},
                 )
@@ -86,7 +86,7 @@ class MongoPipeline:
 
                 self.logger.info(f"Property ID: {property_id}")
             else:
-                result = collection.insert_one(ItemAdapter(item[properties]).asdict())
+                result = coll.insert_one(ItemAdapter(item[properties]).asdict())
                 property_id = result.inserted_id
 
         else:
@@ -98,17 +98,17 @@ class MongoPipeline:
         if isinstance(item[user_properties], dict):
             item[user_properties]["property_id"] = property_id
             line_user_id = item[user_properties]["line_user_id"]
-            collection = self.db[user_properties]
+            coll = self.db[user_properties]
 
             # Check if the user already has a property
-            user_property = collection.find_one(
+            user_property = coll.find_one(
                 {"line_user_id": line_user_id, "property_id": property_id}
             )
             if user_property:
                 # Remove first_succeeded_at and last_succeeded_at fields to avoid updating them
                 item[user_properties].pop("first_succeeded_at", None)
                 item[user_properties].pop("last_succeeded_at", None)
-                collection.update_one(
+                coll.update_one(
                     {"first_succeeded_at": user_property["first_succeeded_at"]},
                     {
                         "$set": {
@@ -118,7 +118,7 @@ class MongoPipeline:
                     },
                 )
             else:
-                collection.insert_one(ItemAdapter(item[user_properties]).asdict())
+                coll.insert_one(ItemAdapter(item[user_properties]).asdict())
 
         else:
             self.logger.error(
@@ -131,19 +131,19 @@ class MongoPipeline:
     def process_property_overviews(self, item, property_id):
         if isinstance(item[property_overviews], dict):
             item[property_overviews]["property_id"] = property_id
-            collection = self.db[property_overviews]
+            coll = self.db[property_overviews]
 
             # Check if the property overview already exists
-            property_overview = collection.find_one({"property_id": property_id})
+            property_overview = coll.find_one({"property_id": property_id})
             if property_overview:
                 # Remove created_at field to avoid updating it
                 item[property_overviews].pop("created_at", None)
-                collection.update_one(
+                coll.update_one(
                     {"created_at": property_overview["created_at"]},
                     {"$set": item[property_overviews]},
                 )
             else:
-                collection.insert_one(ItemAdapter(item[property_overviews]).asdict())
+                coll.insert_one(ItemAdapter(item[property_overviews]).asdict())
 
         else:
             self.logger.error(
@@ -157,18 +157,18 @@ class MongoPipeline:
         logging.info(isinstance(item[common_overviews], dict))
         if isinstance(item[common_overviews], dict):
             item[common_overviews]["property_id"] = property_id
-            collection = self.db[common_overviews]
+            coll = self.db[common_overviews]
             # Check if the common overview already exists
-            common_overview = collection.find_one({"property_id": property_id})
+            common_overview = coll.find_one({"property_id": property_id})
             if common_overview:
                 # Remove created_at field to avoid updating it
                 item[common_overviews].pop("created_at", None)
-                collection.update_one(
+                coll.update_one(
                     {"created_at": common_overview["created_at"]},
                     {"$set": item[common_overviews]},
                 )
             else:
-                collection.insert_one(ItemAdapter(item[common_overviews]).asdict())
+                coll.insert_one(ItemAdapter(item[common_overviews]).asdict())
         else:
             self.logger.error(
                 f"Invalid type for common_overviews: {type(item[common_overviews])}"

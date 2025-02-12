@@ -18,6 +18,7 @@ class Property(BaseModel):
     id: Optional[PyObjectId] = Field(alias="_id", default=None)
     name: str = Field(..., title="the name of the property")
     url: str = Field(..., title="the url of the property")
+    is_active: bool = Field(..., title="the active status of the property")
     created_at: datetime = Field(..., title="the creation date of the property")
     updated_at: datetime = Field(..., title="the update date of the property")
 
