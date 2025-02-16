@@ -4,13 +4,18 @@
 # See: https://docs.scrapy.org/en/latest/topics/item-pipeline.html
 
 
+import hashlib
 import logging
 import os
 from typing import Dict, Union
 
+import gridfs
 import pymongo
+import scrapy
 from itemadapter import ItemAdapter
 from pymongo.server_api import ServerApi
+from scrapy.exceptions import DropItem
+from scrapy.pipelines.images import ImagesPipeline
 
 from app.models.common_overview import CommonOverview
 from app.models.property import Property
@@ -176,3 +181,55 @@ class MongoPipeline:
             raise TypeError(
                 f"Invalid type for common_overviews: {type(item[common_overviews])}"
             )
+
+
+class SuumoImagesPipeline(ImagesPipeline):
+    def open_spider(self, spider):
+
+        super().open_spider(spider)
+
+        mongo_uri = spider.settings.get("MONGO_URI")
+        mongo_db = spider.settings.get("MONGO_DATABASE")
+        self.client = pymongo.MongoClient(mongo_uri)
+        self.db = self.client[mongo_db]
+        self.bucket = gridfs.GridFSBucket(self.db, bucket_name="property_images")
+        self.images_store = spider.settings.get("IMAGES_STORE")
+
+    def close_spider(self, spider):
+        self.client.close()
+
+    def file_path(self, request, response=None, info=None, *, item=None):
+        image_url_hash = hashlib.shake_256(request.url.encode()).hexdigest(5)
+        image_perspective = request.url.split("/")[-2]
+        return f"{image_url_hash}_{image_perspective}.jpg"
+
+    def get_media_requests(self, item, info):
+        properties = item.get("properties")
+        for image_url in properties.get("image_urls", []):
+            yield scrapy.Request(image_url)
+
+    def item_completed(self, results, item, info):
+        image_paths = [x["path"] for ok, x in results if ok]
+        if not image_paths:
+            raise DropItem("Item contains no images")
+
+        properties = item.get("properties")
+        image_url = properties.get("url")
+        for image_path in image_paths:
+            full_image_path = os.path.join(self.images_store, image_path)
+            # Check if image already exists in GridFS
+            if not list(self.bucket.find({"filename": image_path})):
+                with self.bucket.open_upload_stream(
+                    filename=image_path,
+                    chunk_size_bytes=1048576,
+                    metadata={"contentType": "image/jpeg", "url": image_url},
+                ) as grid_in:
+                    with open(full_image_path, "rb") as f:
+                        grid_in.write(f.read())
+            else:
+                info.spider.logger.debug(f"Image {image_path} already exists in GridFS")
+            os.remove(full_image_path)
+
+        adapter = ItemAdapter(item)
+        adapter["image_paths"] = image_paths
+        return item
