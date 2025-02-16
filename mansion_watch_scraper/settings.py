@@ -66,6 +66,7 @@ ROBOTSTXT_OBEY = True
 # See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
 ITEM_PIPELINES = {
     "mansion_watch_scraper.pipelines.MongoPipeline": 300,
+    "mansion_watch_scraper.pipelines.SuumoImagesPipeline": 1,
 }
 
 # Enable and configure the AutoThrottle extension (disabled by default)
@@ -107,3 +108,6 @@ MONGO_URI = os.getenv("MONGO_URI")
 
 # Set the log level
 LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG")
+
+# Set the images store
+IMAGES_STORE = "tmp/images"

@@ -88,6 +88,11 @@ class MansionWatchSpider(scrapy.Spider):
             "last_succeeded_at": current_time,  # end update_at
         }
 
+        # Extract property images
+        property_image_xpath = '//*[@id="js-lightbox"]/li/div/a/@data-src'
+        image_urls = response.xpath(property_image_xpath).getall()
+        property_dict["image_urls"] = image_urls
+
         # Extract property overview details
         property_overview_xpath = f'//div[@class="secTitleOuterR"]/h3[@class="secTitleInnerR" and contains(text(), "{property_name + ElementKeys.APERTMENT_SUFFIX.value}")]/ancestor::div[@class="secTitleOuterR"]/following-sibling::table/tbody/tr'
         property_overview_items = response.xpath(property_overview_xpath)
@@ -116,8 +121,10 @@ class MansionWatchSpider(scrapy.Spider):
             ]
             values = [v.strip() for v in item.xpath("td/text()").getall() if v.strip()]
             for k, v in zip(keys, values):
+                # Extract traffic details separately since it has multiple values and is saved as a list
                 if k == ElementKeys.TRAFFIC.value:
-                    common_overview_dict[k] = values
+                    # Exclude the first value since it is the value of the key (location: 所在地)
+                    common_overview_dict[k] = values[1:]
                 else:
                     common_overview_dict[k] = v
 
