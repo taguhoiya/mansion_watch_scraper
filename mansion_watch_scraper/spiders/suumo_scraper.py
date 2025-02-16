@@ -1,3 +1,4 @@
+import logging
 from datetime import timedelta
 
 import scrapy
@@ -115,9 +116,12 @@ class MansionWatchSpider(scrapy.Spider):
                 k.strip() for k in item.xpath("th/div/text()").getall() if k.strip()
             ]
             values = [v.strip() for v in item.xpath("td/text()").getall() if v.strip()]
+            logging.info(f"Keys: {keys}, Values: {values}")
             for k, v in zip(keys, values):
+                # Extract traffic details separately since it has multiple values and is saved as a list
                 if k == ElementKeys.TRAFFIC.value:
-                    common_overview_dict[k] = values
+                    # Exclude the first value since it is the value of the key (location: 所在地)
+                    common_overview_dict[k] = values[1:]
                 else:
                     common_overview_dict[k] = v
 
