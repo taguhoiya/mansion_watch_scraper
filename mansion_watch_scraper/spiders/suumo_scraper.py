@@ -1,4 +1,3 @@
-import logging
 from datetime import timedelta
 
 import scrapy
@@ -89,6 +88,11 @@ class MansionWatchSpider(scrapy.Spider):
             "last_succeeded_at": current_time,  # end update_at
         }
 
+        # Extract property images
+        property_image_xpath = '//*[@id="js-lightbox"]/li/div/a/@data-src'
+        image_urls = response.xpath(property_image_xpath).getall()
+        property_dict["image_urls"] = image_urls
+
         # Extract property overview details
         property_overview_xpath = f'//div[@class="secTitleOuterR"]/h3[@class="secTitleInnerR" and contains(text(), "{property_name + ElementKeys.APERTMENT_SUFFIX.value}")]/ancestor::div[@class="secTitleOuterR"]/following-sibling::table/tbody/tr'
         property_overview_items = response.xpath(property_overview_xpath)
@@ -116,7 +120,6 @@ class MansionWatchSpider(scrapy.Spider):
                 k.strip() for k in item.xpath("th/div/text()").getall() if k.strip()
             ]
             values = [v.strip() for v in item.xpath("td/text()").getall() if v.strip()]
-            logging.info(f"Keys: {keys}, Values: {values}")
             for k, v in zip(keys, values):
                 # Extract traffic details separately since it has multiple values and is saved as a list
                 if k == ElementKeys.TRAFFIC.value:
