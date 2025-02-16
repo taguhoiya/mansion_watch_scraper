@@ -4,11 +4,13 @@ from typing import List
 
 from bson import ObjectId
 from fastapi import APIRouter, HTTPException
+from motor.motor_asyncio import AsyncIOMotorGridFSBucket
 
 from app.apis.properties import _get_properties_by_user
 from app.db.session import get_db
 from app.models.common_overview import CommonOverview
 from app.models.property import Property
+from app.models.property_image import PropertyImage
 from app.models.property_overview import PropertyOverview
 
 router = APIRouter()
@@ -44,9 +46,15 @@ async def get_property_watchlist(line_user_id: str = None, url: str = None):
             line_user_id, coll_user_props, coll_props
         )
 
+        images = AsyncIOMotorGridFSBucket(db, os.getenv("COLLECTION_PROPERTY_IMAGES"))
+
         for prop in properties:
             prop_id = prop["_id"]
             prop["is_active"] = True
+
+            images_list: List[PropertyImage] = await images.find(
+                {"metadata.url": prop["url"]}
+            ).to_list(length=100)
 
             prop_ovs: List[PropertyOverview] = await coll_prop_ovs.find(
                 {"property_id": ObjectId(prop_id)}
@@ -65,6 +73,10 @@ async def get_property_watchlist(line_user_id: str = None, url: str = None):
                 common_ov = common_ovs[0]
                 prop["location"] = common_ov["location"]
                 prop["transportation"] = common_ov["transportation"]
+            if images_list:
+                for image in images_list:
+                    image["_id"] = str(image["_id"])
+                prop["images"] = images_list
 
     except Exception as e:
         logger.error(f"Error fetching properties: {str(e)}")

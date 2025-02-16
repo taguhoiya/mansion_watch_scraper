@@ -238,4 +238,9 @@ class SuumoImagesPipeline(ImagesPipeline):
 
         adapter = ItemAdapter(item)
         adapter["image_paths"] = image_paths
+
+        # Remove image_urls from properties to avoid storing them in the database
+        if isinstance(properties, dict):
+            properties.pop("image_urls", None)
+
         return item
