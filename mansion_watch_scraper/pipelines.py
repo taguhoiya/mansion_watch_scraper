@@ -7,6 +7,7 @@
 import hashlib
 import logging
 import os
+import shutil
 from typing import Dict, Union
 
 import gridfs
@@ -192,7 +193,9 @@ class SuumoImagesPipeline(ImagesPipeline):
         mongo_db = spider.settings.get("MONGO_DATABASE")
         self.client = pymongo.MongoClient(mongo_uri)
         self.db = self.client[mongo_db]
-        self.bucket = gridfs.GridFSBucket(self.db, bucket_name="property_images")
+        self.bucket = gridfs.GridFSBucket(
+            self.db, bucket_name=os.getenv("COLLECTION_PROPERTY_IMAGES")
+        )
         self.images_store = spider.settings.get("IMAGES_STORE")
 
     def close_spider(self, spider):
@@ -204,7 +207,7 @@ class SuumoImagesPipeline(ImagesPipeline):
         return f"{image_url_hash}_{image_perspective}.jpg"
 
     def get_media_requests(self, item, info):
-        properties = item.get("properties")
+        properties = item.get(os.getenv("COLLECTION_PROPERTIES"))
         for image_url in properties.get("image_urls", []):
             yield scrapy.Request(image_url)
 
@@ -213,7 +216,7 @@ class SuumoImagesPipeline(ImagesPipeline):
         if not image_paths:
             raise DropItem("Item contains no images")
 
-        properties = item.get("properties")
+        properties = item.get(os.getenv("COLLECTION_PROPERTIES"))
         image_url = properties.get("url")
         for image_path in image_paths:
             full_image_path = os.path.join(self.images_store, image_path)
@@ -228,7 +231,10 @@ class SuumoImagesPipeline(ImagesPipeline):
                         grid_in.write(f.read())
             else:
                 info.spider.logger.debug(f"Image {image_path} already exists in GridFS")
-            os.remove(full_image_path)
+
+        # Remove entire 'tmp' folder if it exists, even if it’s not empty
+        if os.path.isdir("tmp"):
+            shutil.rmtree("tmp", ignore_errors=True)
 
         adapter = ItemAdapter(item)
         adapter["image_paths"] = image_paths

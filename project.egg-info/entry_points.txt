@@ -1,2 +1,0 @@
-[scrapy]
-settings = mansion_watch_scraper.settings
