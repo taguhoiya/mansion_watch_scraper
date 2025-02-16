@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     COLLECTION_PROPERTIES: str
     COLLECTION_PROPERTY_OVERVIEWS: str
     COLLECTION_COMMON_OVERVIEWS: str
+    COLLECTION_PROPERTY_IMAGES: str
     LINE_CHANNEL_SECRET: str
 
     class Config:
