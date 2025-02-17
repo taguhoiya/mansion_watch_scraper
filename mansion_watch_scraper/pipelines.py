@@ -4,15 +4,14 @@
 # See: https://docs.scrapy.org/en/latest/topics/item-pipeline.html
 
 
-import hashlib
 import logging
 import os
 import shutil
 from typing import Dict, Union
 
-import gridfs
 import pymongo
 import scrapy
+from google.cloud import storage
 from itemadapter import ItemAdapter
 from pymongo.server_api import ServerApi
 from scrapy.exceptions import DropItem
@@ -31,16 +30,24 @@ common_overviews = os.getenv("COLLECTION_COMMON_OVERVIEWS")
 
 
 class MongoPipeline:
-    def __init__(self, mongo_uri, mongo_db):
+    def __init__(
+        self, mongo_uri, mongo_db, images_store, gcp_bucket_name, gcp_folder_name
+    ):
         self.mongo_uri = mongo_uri
         self.mongo_db = mongo_db
         self.logger = logging.getLogger(__name__)
+        self.images_store = images_store
+        self.gcp_bucket_name = gcp_bucket_name
+        self.folder_name = gcp_folder_name
 
     @classmethod
     def from_crawler(cls, crawler):
         return cls(
             mongo_uri=crawler.settings.get("MONGO_URI"),
             mongo_db=crawler.settings.get("MONGO_DATABASE"),
+            images_store=crawler.settings.get("IMAGES_STORE"),
+            gcp_bucket_name=crawler.settings.get("GCP_BUCKET_NAME"),
+            gcp_folder_name=crawler.settings.get("GCP_FOLDER_NAME"),
         )
 
     def open_spider(self, spider):
@@ -186,25 +193,25 @@ class MongoPipeline:
 
 class SuumoImagesPipeline(ImagesPipeline):
     def open_spider(self, spider):
-
         super().open_spider(spider)
 
+        # Get the MongoDB client and database
         mongo_uri = spider.settings.get("MONGO_URI")
         mongo_db = spider.settings.get("MONGO_DATABASE")
         self.client = pymongo.MongoClient(mongo_uri)
         self.db = self.client[mongo_db]
-        self.bucket = gridfs.GridFSBucket(
-            self.db, bucket_name=os.getenv("COLLECTION_PROPERTY_IMAGES")
-        )
+
+        # Get the local directory where images are stored
         self.images_store = spider.settings.get("IMAGES_STORE")
 
-    def close_spider(self, spider):
-        self.client.close()
+        # Initialize the Google Cloud Storage client and bucket
+        self.gcp_bucket_name = spider.settings.get("GCP_BUCKET_NAME")
+        self.folder_name = spider.settings.get("GCP_FOLDER_NAME")
+        self.storage_client = storage.Client()
+        self.bucket = self.storage_client.bucket(self.gcp_bucket_name)
 
     def file_path(self, request, response=None, info=None, *, item=None):
-        image_url_hash = hashlib.shake_256(request.url.encode()).hexdigest(5)
-        image_perspective = request.url.split("/")[-2]
-        return f"{image_url_hash}_{image_perspective}.jpg"
+        return request.url.split("/")[-1]
 
     def get_media_requests(self, item, info):
         properties = item.get(os.getenv("COLLECTION_PROPERTIES"))
@@ -212,35 +219,46 @@ class SuumoImagesPipeline(ImagesPipeline):
             yield scrapy.Request(image_url)
 
     def item_completed(self, results, item, info):
-        image_paths = [x["path"] for ok, x in results if ok]
+        # Gather the paths of successfully downloaded images
+        image_paths = [res["path"] for ok, res in results if ok]
         if not image_paths:
             raise DropItem("Item contains no images")
 
-        properties = item.get(os.getenv("COLLECTION_PROPERTIES"))
-        image_url = properties.get("url")
         for image_path in image_paths:
-            full_image_path = os.path.join(self.images_store, image_path)
-            # Check if image already exists in GridFS
-            if not list(self.bucket.find({"filename": image_path})):
-                with self.bucket.open_upload_stream(
-                    filename=image_path,
-                    chunk_size_bytes=1048576,
-                    metadata={"contentType": "image/jpeg", "url": image_url},
-                ) as grid_in:
-                    with open(full_image_path, "rb") as f:
-                        grid_in.write(f.read())
-            else:
-                info.spider.logger.debug(f"Image {image_path} already exists in GridFS")
+            local_file = os.path.join(self.images_store, image_path)
+            blob_path = f"{self.folder_name}/{image_path}"
+            blob = self.bucket.blob(blob_path)
 
-        # Remove entire 'tmp' folder if it exists, even if it’s not empty
+            if blob.exists():
+                logging.info(f"Blob {blob_path} already exists. Skipping upload.")
+                continue
+
+            blob.upload_from_filename(local_file)
+            if blob.exists():
+                logging.info(f"Upload successful for {local_file}")
+            else:
+                logging.error(f"Upload failed for {local_file}")
+
+        # Clean up the temporary image folder if it exists.
         if os.path.isdir("tmp"):
             shutil.rmtree("tmp", ignore_errors=True)
+
+        # Update the image URLs in the properties dictionary.
+        item_properties = item.get(os.getenv("COLLECTION_PROPERTIES"))
+        if isinstance(item_properties, dict):
+            # Remove any existing image_urls before updating.
+            item_properties.pop("image_urls", None)
+            item_properties["image_urls"] = [
+                f"https://storage.cloud.google.com/{self.gcp_bucket_name}/{self.folder_name}/{path}"
+                for path in image_paths
+            ]
+            item[os.getenv("COLLECTION_PROPERTIES")] = item_properties
 
         adapter = ItemAdapter(item)
         adapter["image_paths"] = image_paths
 
-        # Remove image_urls from properties to avoid storing them in the database
-        if isinstance(properties, dict):
-            properties.pop("image_urls", None)
+        # Close the MongoDB client and gcp client
+        self.client.close()
+        self.storage_client.close()
 
         return item

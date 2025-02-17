@@ -21,7 +21,7 @@ pip: ## Install the dependencies.
 # TODO: Tweak this to work with a proper file
 .PHONY: scrape
 scrape: ## Run the scraper.
-	@source .env && scrapy runspider mansion_watch_scraper/spiders/suumo_scraper.py -a url="https://suumo.jp/ms/chuko/tokyo/sc_meguro/nc_75709932/" -a line_user_id="U23b619197d01bab29b2c54955db6c2a1"
+	scrapy runspider mansion_watch_scraper/spiders/suumo_scraper.py -a url="https://suumo.jp/ms/chuko/tokyo/sc_meguro/nc_75709932/" -a line_user_id="U23b619197d01bab29b2c54955db6c2a1"
 
 .PHONY: ngrok
 ngrok: ## Start ngrok.

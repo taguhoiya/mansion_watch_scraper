@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     COLLECTION_COMMON_OVERVIEWS: str
     COLLECTION_PROPERTY_IMAGES: str
     LINE_CHANNEL_SECRET: str
+    IMAGES_STORE: str
+    GOOGLE_APPLICATION_CREDENTIALS: str
+    GCP_PROJECT_ID: str
+    GCP_BUCKET_NAME: str
+    GCP_FOLDER_NAME: str
 
     class Config:
         env_file = ".env"
