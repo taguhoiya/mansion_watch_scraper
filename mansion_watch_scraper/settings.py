@@ -110,4 +110,7 @@ MONGO_URI = os.getenv("MONGO_URI")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG")
 
 # Set the images store
-IMAGES_STORE = "tmp/images"
+IMAGES_STORE = os.getenv("IMAGES_STORE")
+GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID")
+GCP_BUCKET_NAME = os.getenv("GCP_BUCKET_NAME")
+GCP_FOLDER_NAME = os.getenv("GCP_FOLDER_NAME")
