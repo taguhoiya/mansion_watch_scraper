@@ -13,6 +13,7 @@ pydantic_settings
 motor
 Pillow
 line-bot-sdk
+google-cloud-storage
 
 # for local development
 ngrok
