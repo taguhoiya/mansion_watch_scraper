@@ -5,3 +5,6 @@ __pycache__/
 logs/
 eggs/
 .env
+
+# Ignore the google service account file
+service-account.json
