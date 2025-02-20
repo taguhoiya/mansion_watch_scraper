@@ -254,7 +254,7 @@ class SuumoImagesPipeline(ImagesPipeline):
                 img = img.convert("RGB")
 
             # Use a fixed quality setting for JPEG compression
-            quality = os.getenv("GCS_IMAGE_QUALITY")
+            quality = int(os.getenv("GCS_IMAGE_QUALITY"))
             buffer = io.BytesIO()
             img.save(buffer, format="JPEG", quality=quality, optimize=True)
             buffer.seek(0)  # Reset buffer position to beginning
