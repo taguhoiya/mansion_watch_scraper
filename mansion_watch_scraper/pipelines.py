@@ -4,6 +4,7 @@
 # See: https://docs.scrapy.org/en/latest/topics/item-pipeline.html
 
 
+import io
 import logging
 import os
 import shutil
@@ -13,6 +14,7 @@ import pymongo
 import scrapy
 from google.cloud import storage
 from itemadapter import ItemAdapter
+from PIL import Image
 from pymongo.server_api import ServerApi
 from scrapy.exceptions import DropItem
 from scrapy.pipelines.images import ImagesPipeline
@@ -64,22 +66,31 @@ class MongoPipeline:
             str, Union[Property, UserProperty, PropertyOverview, CommonOverview]
         ],
         spider,
-    ):
-        property_id = None
+    ) -> Dict:
+        """
+        Process items and store them in MongoDB.
+        Handles different types of items and maintains relationships between them.
+        """
+        try:
+            property_id = None
 
-        if properties in item:
-            property_id = self.process_properties(item)
+            if properties in item:
+                property_id = self.process_properties(item)
 
-        if user_properties in item:
-            self.process_user_properties(item, property_id)
+            if user_properties in item:
+                self.process_user_properties(item, property_id)
 
-        if property_overviews in item:
-            self.process_property_overviews(item, property_id)
+            if property_overviews in item:
+                self.process_property_overviews(item, property_id)
 
-        if common_overviews in item:
-            self.process_common_overviews(item, property_id)
+            if common_overviews in item:
+                self.process_common_overviews(item, property_id)
 
-        return item
+            return item
+
+        except Exception as e:
+            self.logger.error(f"Error processing item: {e}")
+            raise DropItem(f"Failed to process item: {e}")
 
     def process_properties(self, item):
         if isinstance(item[properties], dict):
@@ -131,6 +142,7 @@ class MongoPipeline:
                     },
                 )
             else:
+                item[user_properties]["last_succeeded_at"] = get_current_time()
                 coll.insert_one(ItemAdapter(item[user_properties]).asdict())
 
         else:
@@ -194,6 +206,7 @@ class MongoPipeline:
 class SuumoImagesPipeline(ImagesPipeline):
     def open_spider(self, spider):
         super().open_spider(spider)
+        self.logger = logging.getLogger(__name__)
 
         # Get the MongoDB client and database
         mongo_uri = spider.settings.get("MONGO_URI")
@@ -210,55 +223,118 @@ class SuumoImagesPipeline(ImagesPipeline):
         self.storage_client = storage.Client()
         self.bucket = self.storage_client.bucket(self.gcp_bucket_name)
 
+    def close_spider(self, spider):
+        """Clean up resources when spider closes."""
+        self.client.close()
+        self.storage_client.close()
+
     def file_path(self, request, response=None, info=None, *, item=None):
         return request.url.split("/")[-1]
 
     def get_media_requests(self, item, info):
+        """Get media requests for image downloads."""
         properties = item.get(os.getenv("COLLECTION_PROPERTIES"))
-        for image_url in properties.get("image_urls", []):
+        if isinstance(properties, dict):
+            image_urls = properties.get("image_urls", [])
+        else:
+            # Handle Pydantic model
+            image_urls = getattr(properties, "image_urls", [])
+
+        if not image_urls:
+            self.logger.warning("No image URLs found in item")
+            return []
+
+        for image_url in image_urls:
             yield scrapy.Request(image_url)
 
+    def _process_image(self, local_file):
+        """Process and optimize the image for upload."""
+        with Image.open(local_file) as img:
+            if img.mode == "RGBA":
+                img = img.convert("RGB")
+
+            # Use a fixed quality setting for JPEG compression
+            quality = os.getenv("GCS_IMAGE_QUALITY")
+            buffer = io.BytesIO()
+            img.save(buffer, format="JPEG", quality=quality, optimize=True)
+            buffer.seek(0)  # Reset buffer position to beginning
+
+            return buffer
+
+    def _upload_to_gcs(self, local_file, destination_blob_name):
+        """Upload the file to Google Cloud Storage."""
+        blob = self.bucket.blob(destination_blob_name)
+
+        try:
+            # Process the image and get the buffer
+            buffer = self._process_image(local_file)
+
+            # Upload the processed buffer
+            blob.upload_from_file(
+                buffer, content_type="image/jpeg", rewind=True
+            )  # Add rewind=True
+
+            # Verify uploaded file size
+            blob.reload()
+            self.logger.info(f"Upload complete - GCS size: {blob.size/1024:.2f}KB")
+
+            return True
+        except Exception as e:
+            self.logger.error(
+                f"Failed to upload optimized image {destination_blob_name}: {e}"
+            )
+            return False
+
     def item_completed(self, results, item, info):
-        # Gather the paths of successfully downloaded images
-        image_paths = [res["path"] for ok, res in results if ok]
-        if not image_paths:
-            raise DropItem("Item contains no images")
+        """Handle completed item processing with proper cleanup and error handling."""
+        try:
+            # Gather successful image paths
+            image_paths = [res["path"] for ok, res in results if ok]
+            if not image_paths:
+                raise DropItem("Item contains no images")
 
-        for image_path in image_paths:
-            local_file = os.path.join(self.images_store, image_path)
-            blob_path = f"{self.folder_name}/{image_path}"
-            blob = self.bucket.blob(blob_path)
+            # Process each image
+            successful_uploads = []
+            for image_path in image_paths:
+                local_file = os.path.join(self.images_store, image_path)
+                blob_path = f"{self.folder_name}/{image_path}"
 
-            if blob.exists():
-                logging.info(f"Blob {blob_path} already exists. Skipping upload.")
-                continue
+                if self._upload_to_gcs(local_file, blob_path):
+                    successful_uploads.append(image_path)
+                else:
+                    self.logger.warning(
+                        f"Failed to upload optimized image: {blob_path}"
+                    )
 
-            blob.upload_from_filename(local_file)
-            if blob.exists():
-                logging.info(f"Upload successful for {local_file}")
+            # Clean up temporary files
+            if os.path.isdir("tmp"):
+                shutil.rmtree("tmp", ignore_errors=True)
+
+            # Update item with successful uploads
+            properties = item.get(os.getenv("COLLECTION_PROPERTIES"))
+            if isinstance(properties, dict):
+                properties.pop("image_urls", None)
+                properties["image_urls"] = [
+                    f"https://storage.cloud.google.com/{self.gcp_bucket_name}/{self.folder_name}/{path}"
+                    for path in successful_uploads
+                ]
             else:
-                logging.error(f"Upload failed for {local_file}")
+                # Handle Pydantic model
+                setattr(
+                    properties,
+                    "image_urls",
+                    [
+                        f"https://storage.cloud.google.com/{self.gcp_bucket_name}/{self.folder_name}/{path}"
+                        for path in successful_uploads
+                    ],
+                )
 
-        # Clean up the temporary image folder if it exists.
-        if os.path.isdir("tmp"):
-            shutil.rmtree("tmp", ignore_errors=True)
+            item[os.getenv("COLLECTION_PROPERTIES")] = properties
+            adapter = ItemAdapter(item)
+            adapter["image_paths"] = successful_uploads
 
-        # Update the image URLs in the properties dictionary.
-        item_properties = item.get(os.getenv("COLLECTION_PROPERTIES"))
-        if isinstance(item_properties, dict):
-            # Remove any existing image_urls before updating.
-            item_properties.pop("image_urls", None)
-            item_properties["image_urls"] = [
-                f"https://storage.cloud.google.com/{self.gcp_bucket_name}/{self.folder_name}/{path}"
-                for path in image_paths
-            ]
-            item[os.getenv("COLLECTION_PROPERTIES")] = item_properties
+            return item
 
-        adapter = ItemAdapter(item)
-        adapter["image_paths"] = image_paths
-
-        # Close the MongoDB client and gcp client
-        self.client.close()
-        self.storage_client.close()
-
-        return item
+        except Exception as e:
+            self.logger.error(f"Error in item_completed: {e}")
+            raise DropItem(f"Failed to process images: {e}")

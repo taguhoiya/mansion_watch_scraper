@@ -1,6 +1,9 @@
 from datetime import timedelta
+from typing import List, Optional
 
 import scrapy
+from bson.objectid import ObjectId  # Changed from PyObjectId to ObjectId
+from scrapy.http import Response
 from scrapy.spidermiddlewares.httperror import HttpError
 from twisted.internet.error import DNSLookupError, TCPTimedOutError, TimeoutError
 
@@ -17,10 +20,26 @@ from enums.html_element_keys import ElementKeys
 
 
 class MansionWatchSpider(scrapy.Spider):
+    """Spider for scraping mansion property details from SUUMO website."""
+
     name = "mansion_watch_scraper"
     allowed_domains = ["suumo.jp"]
 
-    def __init__(self, url=None, line_user_id=None, *args, **kwargs):
+    def __init__(
+        self,
+        url: Optional[str] = None,
+        line_user_id: Optional[str] = None,
+        *args,
+        **kwargs,
+    ):
+        """Initialize the spider with URL and user ID.
+
+        Args:
+            url: The URL to scrape
+            line_user_id: The Line user ID
+        Raises:
+            ValueError: If url or line_user_id is missing
+        """
         super(MansionWatchSpider, self).__init__(*args, **kwargs)
         if url is not None:
             self.start_urls = [url]
@@ -31,43 +50,144 @@ class MansionWatchSpider(scrapy.Spider):
                 f"Both url and line_user_id are required. url: {url}, line_user_id: {line_user_id}"
             )
 
-    # Ref: https://docs.scrapy.org/en/latest/topics/request-response.html#topics-request-response-ref-errbacks
     def start_requests(self):
+        """Start the scraping requests with error handling."""
         for url in self.start_urls:
             yield scrapy.Request(
                 url=url,
                 callback=self.parse,
                 errback=self.errback_httpbin,
+                dont_filter=True,
             )
 
     def errback_httpbin(self, failure):
-        # log all failures
+        """Handle various network and HTTP errors.
+
+        Args:
+            failure: The failure object containing error details
+        """
         self.logger.error(repr(failure))
 
         if failure.check(HttpError):
-            # these exceptions come from HttpError spider middleware
-            # you can get the non-200 response
             response = failure.value.response
             self.logger.error("HttpError on %s", response.url)
-
         elif failure.check(DNSLookupError):
-            # this is the original request
             request = failure.request
             self.logger.error("DNSLookupError on %s", request.url)
-
         elif failure.check(TimeoutError, TCPTimedOutError):
             request = failure.request
             self.logger.error("TimeoutError on %s", request.url)
 
-    def parse(self, response):
+    def _extract_property_name(self, response: Response) -> Optional[str]:
+        """Extract the property name from the response.
+
+        Args:
+            response: Scrapy response object
+        Returns:
+            The property name if found, None otherwise
+        """
+        property_name_xpath = f'normalize-space(//tr[th/div[contains(text(), "{ElementKeys.PROPERTY_NAME.value}")]]/td)'
+        return response.xpath(property_name_xpath).get()
+
+    def _extract_image_urls(self, response: Response) -> List[str]:
+        """Extract property image URLs.
+
+        Args:
+            response: Scrapy response object
+        Returns:
+            List of image URLs
+        """
+        property_image_xpath = '//*[@id="js-lightbox"]/li/div/a/@data-src'
+        urls = response.xpath(property_image_xpath).getall()
+        return urls
+
+    def _extract_property_overview(
+        self,
+        response: Response,
+        property_name: str,
+        current_time,
+        property_id: ObjectId,
+    ) -> PropertyOverview:
+        """Extract property overview details.
+
+        Args:
+            response: Scrapy response object
+            property_name: Name of the property
+            current_time: Current timestamp
+            property_id: ID of the property
+        Returns:
+            PropertyOverview object containing property overview details
+        """
+        xpath = f'//div[@class="secTitleOuterR"]/h3[@class="secTitleInnerR" and contains(text(), "{property_name + ElementKeys.APERTMENT_SUFFIX.value}")]/ancestor::div[@class="secTitleOuterR"]/following-sibling::table/tbody/tr'
+        items = response.xpath(xpath)
+
+        overview_dict = {}
+        for item in items:
+            keys = [
+                k.strip() for k in item.xpath("th/div/text()").getall() if k.strip()
+            ]
+            values = [v.strip() for v in item.xpath("td/text()").getall() if v.strip()]
+            overview_dict.update(dict(zip(keys, values)))
+
+        overview_dict = translate_keys(overview_dict, PROPERTY_OVERVIEW_TRANSLATION_MAP)
+        overview_dict.update(
+            {
+                "created_at": current_time,
+                "updated_at": current_time,
+                "property_id": property_id,
+            }
+        )
+        return PropertyOverview(**overview_dict)
+
+    def _extract_common_overview(
+        self, response: Response, current_time, property_id: ObjectId
+    ) -> CommonOverview:
+        """Extract common overview details.
+
+        Args:
+            response: Scrapy response object
+            current_time: Current timestamp
+            property_id: ID of the property
+        Returns:
+            CommonOverview object containing common overview details
+        """
+        xpath = f'//div[@class="secTitleOuterR"]/h3[@class="secTitleInnerR" and contains(text(), "{ElementKeys.COMMON_OVERVIEW.value}")]//ancestor::div[@class="secTitleOuterR"]/following-sibling::table/tbody/tr'
+        items = response.xpath(xpath)
+
+        overview_dict = {}
+        for item in items:
+            keys = [
+                k.strip() for k in item.xpath("th/div/text()").getall() if k.strip()
+            ]
+            values = [v.strip() for v in item.xpath("td/text()").getall() if v.strip()]
+            for k, v in zip(keys, values):
+                if k == ElementKeys.TRAFFIC.value:
+                    overview_dict[k] = values[1:]
+                else:
+                    overview_dict[k] = v
+
+        overview_dict = translate_keys(overview_dict, COMMON_OVERVIEW_TRANSLATION_MAP)
+        overview_dict.update(
+            {
+                "property_id": property_id,
+                "created_at": current_time,
+                "updated_at": current_time,
+            }
+        )
+        return CommonOverview(**overview_dict)
+
+    def parse(self, response: Response):
+        """Parse the scraped data from the response.
+
+        Args:
+            response: Scrapy response object
+        Yields:
+            Dictionary containing all extracted property information
+        """
         self.logger.info("Successful response from %s", response.url)
         current_time = get_current_time()
 
-        # Extract a property name to check if the property is available to scrape
-        property_name_xpath = f'normalize-space(//tr[th/div[contains(text(), "{ElementKeys.PROPERTY_NAME.value}")]]/td)'
-        property_name = response.xpath(property_name_xpath).get()
-
-        property_dict: dict[str, Property] = {}
+        property_name = self._extract_property_name(response)
         if not property_name:
             self.logger.warning(
                 f"Property name not found in the response. URL: {response.url}"
@@ -76,69 +196,30 @@ class MansionWatchSpider(scrapy.Spider):
         property_dict = {
             "name": property_name if property_name else "物件名不明",
             "url": response.url,
-            "is_active": True if property_name else False,
+            "is_active": bool(property_name),
             "created_at": current_time,
             "updated_at": current_time,
+            "image_urls": self._extract_image_urls(response),
         }
-        user_property_dict: dict[str, UserProperty] = {
+        property_obj = Property(**property_dict)
+
+        user_property_dict = {
+            "property_id": property_obj.id,
             "line_user_id": self.line_user_id,
-            "last_aggregated_at": current_time,  # start update_at
-            "next_aggregated_at": current_time + timedelta(days=3),  # 3 days later
-            "first_succeeded_at": current_time,  # created_at
-            "last_succeeded_at": current_time,  # end update_at
+            # "first_succeeded_at": current_time,
+            # "last_succeeded_at": current_time + timedelta(microseconds=1),  # This will be updat
+            "last_aggregated_at": current_time,
+            "next_aggregated_at": current_time + timedelta(days=3),
         }
+        user_property_obj = UserProperty(**user_property_dict)
 
-        # Extract property images
-        property_image_xpath = '//*[@id="js-lightbox"]/li/div/a/@data-src'
-        image_urls = response.xpath(property_image_xpath).getall()
-        property_dict["image_urls"] = image_urls
-
-        # Extract property overview details
-        property_overview_xpath = f'//div[@class="secTitleOuterR"]/h3[@class="secTitleInnerR" and contains(text(), "{property_name + ElementKeys.APERTMENT_SUFFIX.value}")]/ancestor::div[@class="secTitleOuterR"]/following-sibling::table/tbody/tr'
-        property_overview_items = response.xpath(property_overview_xpath)
-        property_overview_dict: dict[str, PropertyOverview] = {}
-        for item in property_overview_items:
-            keys = [
-                k.strip() for k in item.xpath("th/div/text()").getall() if k.strip()
-            ]
-            values = [v.strip() for v in item.xpath("td/text()").getall() if v.strip()]
-            property_overview_dict.update(dict(zip(keys, values)))
-
-        property_overview_dict = translate_keys(
-            property_overview_dict, PROPERTY_OVERVIEW_TRANSLATION_MAP
-        )
-        property_overview_dict.update(
-            {"created_at": current_time, "updated_at": current_time}
-        )
-
-        # Extract common overview details
-        common_overview_xpath = f'//div[@class="secTitleOuterR"]/h3[@class="secTitleInnerR" and contains(text(), "{ElementKeys.COMMON_OVERVIEW.value}")]//ancestor::div[@class="secTitleOuterR"]/following-sibling::table/tbody/tr'
-        common_overview_items = response.xpath(common_overview_xpath)
-        common_overview_dict: dict[str, CommonOverview] = {}
-        for item in common_overview_items:
-            keys = [
-                k.strip() for k in item.xpath("th/div/text()").getall() if k.strip()
-            ]
-            values = [v.strip() for v in item.xpath("td/text()").getall() if v.strip()]
-            for k, v in zip(keys, values):
-                # Extract traffic details separately since it has multiple values and is saved as a list
-                if k == ElementKeys.TRAFFIC.value:
-                    # Exclude the first value since it is the value of the key (location: 所在地)
-                    common_overview_dict[k] = values[1:]
-                else:
-                    common_overview_dict[k] = v
-
-        common_overview_dict = translate_keys(
-            common_overview_dict, COMMON_OVERVIEW_TRANSLATION_MAP
-        )
-        common_overview_dict.update(
-            {"created_at": current_time, "updated_at": current_time}
-        )
-
-        output = {
-            "properties": property_dict,
-            "user_properties": user_property_dict,
-            "property_overviews": property_overview_dict,
-            "common_overviews": common_overview_dict,
+        yield {
+            "properties": property_obj,
+            "user_properties": user_property_obj,
+            "property_overviews": self._extract_property_overview(
+                response, property_name, current_time, property_obj.id
+            ),
+            "common_overviews": self._extract_common_overview(
+                response, current_time, property_obj.id
+            ),
         }
-        yield output
