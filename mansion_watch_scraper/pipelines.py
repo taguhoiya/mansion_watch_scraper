@@ -59,6 +59,7 @@ class MongoPipeline:
 
     def close_spider(self, spider):
         self.client.close()
+        self.logger.info("Completed MongoPipeline")
 
     def _convert_to_dict(self, item, item_type: str) -> dict:
         """Convert Pydantic model or dict to dictionary."""
@@ -191,6 +192,7 @@ class SuumoImagesPipeline(ImagesPipeline):
         """Clean up resources when spider closes."""
         self.client.close()
         self.storage_client.close()
+        self.logger.info("Completed SuumoImagesPipeline")
 
     def file_path(self, request, response=None, info=None, *, item=None):
         return request.url.split("/")[-1]
