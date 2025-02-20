@@ -60,6 +60,87 @@ class MongoPipeline:
     def close_spider(self, spider):
         self.client.close()
 
+    def _convert_to_dict(self, item, item_type: str) -> dict:
+        """Convert Pydantic model or dict to dictionary."""
+        if hasattr(item, "dict"):
+            return item.dict()
+        elif isinstance(item, dict):
+            return item
+        else:
+            self.logger.error(f"Invalid type for {item_type}: {type(item)}")
+            raise TypeError(f"Invalid type for {item_type}: {type(item)}")
+
+    def _update_or_insert(self, collection, query, data, remove_fields=None):
+        """Update existing document or insert new one."""
+        remove_fields = remove_fields or []
+        existing = collection.find_one(query)
+
+        if existing:
+            for field in remove_fields:
+                data.pop(field, None)
+            # Use the query instead of created_at for updating
+            collection.update_one(query, {"$set": data})
+            return existing["_id"]
+        else:
+            result = collection.insert_one(data)
+            return result.inserted_id
+
+    def process_properties(self, item):
+        property_dict = self._convert_to_dict(item[properties], "properties")
+        return self._update_or_insert(
+            self.db[properties],
+            {"url": property_dict["url"]},
+            property_dict,
+            ["created_at"],
+        )
+
+    def process_user_properties(self, item, property_id):
+        user_property_dict = self._convert_to_dict(
+            item[user_properties], "user_properties"
+        )
+        user_property_dict["property_id"] = property_id
+
+        query = {
+            "line_user_id": user_property_dict["line_user_id"],
+            "property_id": property_id,
+        }
+
+        if (
+            self._update_or_insert(
+                self.db[user_properties],
+                query,
+                {**user_property_dict, "last_succeeded_at": get_current_time()},
+                ["first_succeeded_at", "last_succeeded_at"],
+            )
+            is None
+        ):
+            user_property_dict["last_succeeded_at"] = get_current_time()
+            self.db[user_properties].insert_one(user_property_dict)
+
+    def process_property_overviews(self, item, property_id):
+        overview_dict = self._convert_to_dict(
+            item[property_overviews], "property_overviews"
+        )
+        overview_dict["property_id"] = property_id
+        self._update_or_insert(
+            self.db[property_overviews],
+            {"property_id": property_id},
+            overview_dict,
+            ["created_at"],
+        )
+
+    def process_common_overviews(self, item, property_id):
+        overview_dict = self._convert_to_dict(
+            item[common_overviews], "common_overviews"
+        )
+        overview_dict["property_id"] = property_id
+        self._update_or_insert(
+            self.db[common_overviews],
+            {"property_id": property_id},
+            overview_dict,
+            ["created_at"],
+        )
+
     def process_item(
         self,
         item: Dict[
@@ -67,140 +148,23 @@ class MongoPipeline:
         ],
         spider,
     ) -> Dict:
-        """
-        Process items and store them in MongoDB.
-        Handles different types of items and maintains relationships between them.
-        """
+        """Process items and store them in MongoDB."""
         try:
-            property_id = None
+            property_id = self.process_properties(item) if properties in item else None
 
-            if properties in item:
-                property_id = self.process_properties(item)
-
-            if user_properties in item:
-                self.process_user_properties(item, property_id)
-
-            if property_overviews in item:
-                self.process_property_overviews(item, property_id)
-
-            if common_overviews in item:
-                self.process_common_overviews(item, property_id)
+            for processor in [
+                (user_properties, self.process_user_properties),
+                (property_overviews, self.process_property_overviews),
+                (common_overviews, self.process_common_overviews),
+            ]:
+                if processor[0] in item:
+                    processor[1](item, property_id)
 
             return item
 
         except Exception as e:
             self.logger.error(f"Error processing item: {e}")
             raise DropItem(f"Failed to process item: {e}")
-
-    def process_properties(self, item):
-        if isinstance(item[properties], dict):
-            url = item[properties]["url"]
-            coll = self.db[properties]
-
-            # Check if the property already exists
-            property = coll.find_one({"url": url})
-            if property:
-                # Remove created_at field to avoid updating it
-                item[properties].pop("created_at", None)
-                result = coll.update_one(
-                    {"created_at": property["created_at"]},
-                    {"$set": item[properties]},
-                )
-                property_id = property["_id"]
-
-                self.logger.info(f"Property ID: {property_id}")
-            else:
-                result = coll.insert_one(ItemAdapter(item[properties]).asdict())
-                property_id = result.inserted_id
-
-        else:
-            self.logger.error(f"Invalid type for properties: {type(item[properties])}")
-            raise TypeError(f"Invalid type for properties: {type(item[properties])}")
-        return property_id
-
-    def process_user_properties(self, item, property_id):
-        if isinstance(item[user_properties], dict):
-            item[user_properties]["property_id"] = property_id
-            line_user_id = item[user_properties]["line_user_id"]
-            coll = self.db[user_properties]
-
-            # Check if the user already has a property
-            user_property = coll.find_one(
-                {"line_user_id": line_user_id, "property_id": property_id}
-            )
-            if user_property:
-                # Remove first_succeeded_at and last_succeeded_at fields to avoid updating them
-                item[user_properties].pop("first_succeeded_at", None)
-                item[user_properties].pop("last_succeeded_at", None)
-                coll.update_one(
-                    {"first_succeeded_at": user_property["first_succeeded_at"]},
-                    {
-                        "$set": {
-                            "last_succeeded_at": get_current_time(),
-                            **item[user_properties],
-                        }
-                    },
-                )
-            else:
-                item[user_properties]["last_succeeded_at"] = get_current_time()
-                coll.insert_one(ItemAdapter(item[user_properties]).asdict())
-
-        else:
-            self.logger.error(
-                f"Invalid type for user_properties: {type(item[user_properties])}"
-            )
-            raise TypeError(
-                f"Invalid type for user_properties: {type(item[user_properties])}"
-            )
-
-    def process_property_overviews(self, item, property_id):
-        if isinstance(item[property_overviews], dict):
-            item[property_overviews]["property_id"] = property_id
-            coll = self.db[property_overviews]
-
-            # Check if the property overview already exists
-            property_overview = coll.find_one({"property_id": property_id})
-            if property_overview:
-                # Remove created_at field to avoid updating it
-                item[property_overviews].pop("created_at", None)
-                coll.update_one(
-                    {"created_at": property_overview["created_at"]},
-                    {"$set": item[property_overviews]},
-                )
-            else:
-                coll.insert_one(ItemAdapter(item[property_overviews]).asdict())
-
-        else:
-            self.logger.error(
-                f"Invalid type for property_overviews: {type(item[property_overviews])}"
-            )
-            raise TypeError(
-                f"Invalid type for property_overviews: {type(item[property_overviews])}"
-            )
-
-    def process_common_overviews(self, item, property_id):
-        logging.info(isinstance(item[common_overviews], dict))
-        if isinstance(item[common_overviews], dict):
-            item[common_overviews]["property_id"] = property_id
-            coll = self.db[common_overviews]
-            # Check if the common overview already exists
-            common_overview = coll.find_one({"property_id": property_id})
-            if common_overview:
-                # Remove created_at field to avoid updating it
-                item[common_overviews].pop("created_at", None)
-                coll.update_one(
-                    {"created_at": common_overview["created_at"]},
-                    {"$set": item[common_overviews]},
-                )
-            else:
-                coll.insert_one(ItemAdapter(item[common_overviews]).asdict())
-        else:
-            self.logger.error(
-                f"Invalid type for common_overviews: {type(item[common_overviews])}"
-            )
-            raise TypeError(
-                f"Invalid type for common_overviews: {type(item[common_overviews])}"
-            )
 
 
 class SuumoImagesPipeline(ImagesPipeline):
@@ -234,11 +198,8 @@ class SuumoImagesPipeline(ImagesPipeline):
     def get_media_requests(self, item, info):
         """Get media requests for image downloads."""
         properties = item.get(os.getenv("COLLECTION_PROPERTIES"))
-        if isinstance(properties, dict):
-            image_urls = properties.get("image_urls", [])
-        else:
-            # Handle Pydantic model
-            image_urls = getattr(properties, "image_urls", [])
+
+        image_urls = properties.image_urls if hasattr(properties, "image_urls") else []
 
         if not image_urls:
             self.logger.warning("No image URLs found in item")
@@ -276,7 +237,6 @@ class SuumoImagesPipeline(ImagesPipeline):
 
             # Verify uploaded file size
             blob.reload()
-            self.logger.info(f"Upload complete - GCS size: {blob.size/1024:.2f}KB")
 
             return True
         except Exception as e:
