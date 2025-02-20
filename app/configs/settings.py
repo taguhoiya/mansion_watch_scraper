@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     GCP_PROJECT_ID: str
     GCP_BUCKET_NAME: str
     GCP_FOLDER_NAME: str
+    GCS_IMAGE_QUALITY: int
 
     class Config:
         env_file = ".env"
