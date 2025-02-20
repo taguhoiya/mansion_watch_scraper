@@ -17,28 +17,39 @@ class UserProperty(BaseModel):
         ...,
         title="the next aggregated time, which is 3 days later from the last aggregated time",
     )
-    first_succeeded_at: datetime = Field(
-        ..., title="the first succeeded time of aggregation, which is the created time"
+    first_succeeded_at: Optional[datetime] = Field(
+        default=None,
+        title="the first succeeded time of aggregation, which is the created time",
     )
-    last_succeeded_at: datetime = Field(
-        ...,
+    last_succeeded_at: Optional[datetime] = Field(
+        default=None,
         title="the last succeeded time of aggregation, which is the end of aggregated time",
     )
 
     @field_validator("id", "property_id")
-    def validate_object_id(cls, v):
+    def validate_object_id(cls, v) -> PyObjectId:
+        """Validate and convert object IDs."""
         return PyObjectId(v)
 
     @field_validator("line_user_id")
-    def validate_line_user_id(cls, line_user_id):
+    def validate_line_user_id(cls, line_user_id: str) -> str:
+        """Validate that line_user_id starts with 'U'."""
         if not line_user_id.startswith("U"):
             raise ValueError("line_user_id must start with U")
+        return line_user_id
 
     @field_validator("last_succeeded_at")
-    def validate_succeeded_timestamps(cls, last_succeeded_at, values):
-        first_succeeded_at = values.get("first_succeeded_at")
-        last_aggregated_at = values.get("last_aggregated_at")
-        if first_succeeded_at and last_succeeded_at < first_succeeded_at:
+    def validate_succeeded_timestamps(
+        cls, last_succeeded_at: Optional[datetime], values: dict
+    ) -> Optional[datetime]:
+        """Validate that last_succeeded_at is between first_succeeded_at and last_aggregated_at."""
+        if last_succeeded_at is None:
+            return None
+
+        first_succeeded_at = values.data.get("first_succeeded_at")
+        last_aggregated_at = values.data.get("last_aggregated_at")
+
+        if first_succeeded_at and last_succeeded_at <= first_succeeded_at:
             raise ValueError(
                 "last_succeeded_at must be equal to or later than first_succeeded_at"
             )
@@ -49,9 +60,12 @@ class UserProperty(BaseModel):
         return last_succeeded_at
 
     @field_validator("next_aggregated_at")
-    def validate_aggregated_times(cls, next_aggregated_at, values):
-        last_aggregated_at = values.get("last_aggregated_at")
-        if last_aggregated_at and next_aggregated_at < last_aggregated_at:
+    def validate_aggregated_times(
+        cls, next_aggregated_at: datetime, values: dict
+    ) -> datetime:
+        """Validate that next_aggregated_at is after last_aggregated_at."""
+        last_aggregated_at = values.data.get("last_aggregated_at")
+        if last_aggregated_at and next_aggregated_at <= last_aggregated_at:
             raise ValueError("next_aggregated_at must be later than last_aggregated_at")
         return next_aggregated_at
 

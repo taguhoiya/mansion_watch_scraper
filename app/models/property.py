@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -21,6 +21,9 @@ class Property(BaseModel):
     is_active: bool = Field(..., title="the active status of the property")
     created_at: datetime = Field(..., title="the creation date of the property")
     updated_at: datetime = Field(..., title="the update date of the property")
+    image_urls: Optional[List[str]] = Field(
+        default_factory=list, title="the suumo image urls of the property"
+    )
 
     @field_validator("id")
     def validate_object_id(cls, v):
