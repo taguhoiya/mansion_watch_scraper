@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -36,9 +35,6 @@ from app.models.id import PyObjectId
 
 
 class PropertyOverview(BaseModel):
-    id: Optional[PyObjectId] = Field(
-        alias="_id", default=None, title="the id of the property"
-    )
     sales_schedule: str = Field(..., title="the sales schedule")
     event_information: str = Field(..., title="the event information")
     number_of_units_for_sale: str = Field(..., title="the number of units for sale")
@@ -73,7 +69,7 @@ class PropertyOverview(BaseModel):
     )
     property_id: PyObjectId = Field(..., title="the id of the property")
 
-    @field_validator("id", "property_id")
+    @field_validator("property_id")
     def validate_object_id(cls, v):
         return PyObjectId(v)
 

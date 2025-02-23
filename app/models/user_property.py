@@ -7,7 +7,6 @@ from app.models.id import PyObjectId
 
 
 class UserProperty(BaseModel):
-    id: Optional[PyObjectId] = Field(alias="_id", default=None)
     line_user_id: str = Field(..., title="the user id from LINE")
     property_id: PyObjectId = Field(..., title="the id of the property")
     last_aggregated_at: datetime = Field(
@@ -26,7 +25,7 @@ class UserProperty(BaseModel):
         title="the last succeeded time of aggregation, which is the end of aggregated time",
     )
 
-    @field_validator("id", "property_id")
+    @field_validator("property_id")
     def validate_object_id(cls, v) -> PyObjectId:
         """Validate and convert object IDs."""
         return PyObjectId(v)

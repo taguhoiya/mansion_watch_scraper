@@ -3,8 +3,6 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.models.id import PyObjectId
-
 # {
 #     "_id": {"$oid": "6790f20a4dffe24d21125ae6"},
 #     "property_name": "クレヴィア渋谷富ヶ谷",
@@ -15,7 +13,6 @@ from app.models.id import PyObjectId
 
 
 class Property(BaseModel):
-    id: Optional[PyObjectId] = Field(alias="_id", default=None)
     name: str = Field(..., title="the name of the property")
     url: str = Field(..., title="the url of the property")
     is_active: bool = Field(..., title="the active status of the property")
@@ -24,10 +21,6 @@ class Property(BaseModel):
     image_urls: Optional[List[str]] = Field(
         default_factory=list, title="the suumo image urls of the property"
     )
-
-    @field_validator("id")
-    def validate_object_id(cls, v):
-        return PyObjectId(v)
 
     @field_validator("url")
     def validate_url(cls, url):
