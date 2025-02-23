@@ -2,14 +2,21 @@ import logging
 import os
 from typing import List
 
+from bson import ObjectId
 from fastapi import APIRouter, HTTPException
 
 from app.db.session import get_db
+from app.models.common_overview import CommonOverview
 from app.models.property import Property
+from app.models.property_overview import PropertyOverview
 from app.services.utils import to_json_serializable
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+collection_properties = os.getenv("COLLECTION_PROPERTIES")
+collection_user_properties = os.getenv("COLLECTION_USER_PROPERTIES")
+collection_property_overviews = os.getenv("COLLECTION_PROPERTY_OVERVIEWS")
+collection_common_overviews = os.getenv("COLLECTION_COMMON_OVERVIEWS")
 
 
 async def _get_properties_by_user_and_url(
@@ -74,8 +81,8 @@ async def get_property(url: str = None, line_user_id: str = None):
 
     try:
         db = get_db()
-        coll_prop = db[os.getenv("COLLECTION_PROPERTIES")]
-        coll_user_prop = db[os.getenv("COLLECTION_USER_PROPERTIES")]
+        coll_prop = db[collection_properties]
+        coll_user_prop = db[collection_user_properties]
 
         if line_user_id and url:
             properties = await _get_properties_by_user_and_url(
@@ -94,3 +101,49 @@ async def get_property(url: str = None, line_user_id: str = None):
         raise HTTPException(status_code=500, detail=str(e))
 
     return properties
+
+
+@router.get(
+    "/properties/{property_id}",
+    summary="Get the property information by property id",
+    response_description="The property information",
+    # response_model=Property,
+    response_model_by_alias=False,
+)
+async def get_property_by_id(property_id: str):
+    """Get the property information by property id."""
+    try:
+        db = get_db()
+        coll_prop = db[collection_properties]
+        coll_prop_ov = db[collection_property_overviews]
+        coll_prop_commom_ov = db[collection_common_overviews]
+
+        # Convert string ID to ObjectId for queries
+        obj_id = ObjectId(property_id)
+
+        # Query with ObjectId but convert to string in response
+        prop: Property = await coll_prop.find_one({"_id": obj_id})
+        if not prop:
+            raise HTTPException(status_code=404, detail="Property not found")
+
+        prop_ov: PropertyOverview = await coll_prop_ov.find_one({"property_id": obj_id})
+        if not prop_ov:
+            raise HTTPException(status_code=404, detail="Property overview not found")
+
+        common_ov: CommonOverview = await coll_prop_commom_ov.find_one(
+            {"property_id": obj_id}
+        )
+        if not common_ov:
+            raise HTTPException(status_code=404, detail="Common overview not found")
+
+        # Convert all ObjectIds to strings
+        result = {}
+        result["property"] = to_json_serializable(prop)
+        result["property_overview"] = to_json_serializable(prop_ov)
+        result["common_overview"] = to_json_serializable(common_ov)
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error fetching property: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
