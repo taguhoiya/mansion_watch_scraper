@@ -151,15 +151,29 @@ class MongoPipeline:
     ) -> Dict:
         """Process items and store them in MongoDB."""
         try:
+            # First insert/update property and get its ID
             property_id = self.process_properties(item) if properties in item else None
 
-            for processor in [
-                (user_properties, self.process_user_properties),
-                (property_overviews, self.process_property_overviews),
-                (common_overviews, self.process_common_overviews),
-            ]:
-                if processor[0] in item:
-                    processor[1](item, property_id)
+            if property_id:
+                # Add property_id to the dictionaries before processing
+                if user_properties in item:
+                    item[user_properties]["property_id"] = property_id
+                    item[user_properties] = UserProperty(**item[user_properties])
+
+                if property_overviews in item:
+                    item[property_overviews].property_id = property_id
+
+                if common_overviews in item:
+                    item[common_overviews].property_id = property_id
+
+                # Process remaining items
+                for processor in [
+                    (user_properties, self.process_user_properties),
+                    (property_overviews, self.process_property_overviews),
+                    (common_overviews, self.process_common_overviews),
+                ]:
+                    if processor[0] in item:
+                        processor[1](item, property_id)
 
             return item
 

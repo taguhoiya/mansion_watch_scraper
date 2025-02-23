@@ -13,7 +13,6 @@ from app.models.property_overview import (
     PROPERTY_OVERVIEW_TRANSLATION_MAP,
     PropertyOverview,
 )
-from app.models.user_property import UserProperty
 from app.services.dates import get_current_time
 from app.services.utils import translate_keys
 from enums.html_element_keys import ElementKeys
@@ -203,23 +202,22 @@ class MansionWatchSpider(scrapy.Spider):
         }
         property_obj = Property(**property_dict)
 
+        # Create base dictionaries without property_id
         user_property_dict = {
-            "property_id": property_obj.id,
             "line_user_id": self.line_user_id,
-            # "first_succeeded_at": current_time,
-            # "last_succeeded_at": current_time + timedelta(microseconds=1),  # This will be updat
             "last_aggregated_at": current_time,
             "next_aggregated_at": current_time + timedelta(days=3),
         }
-        user_property_obj = UserProperty(**user_property_dict)
+
+        # Extract overviews without property_id
+        property_overview = self._extract_property_overview(
+            response, property_name, current_time, None
+        )
+        common_overview = self._extract_common_overview(response, current_time, None)
 
         yield {
             "properties": property_obj,
-            "user_properties": user_property_obj,
-            "property_overviews": self._extract_property_overview(
-                response, property_name, current_time, property_obj.id
-            ),
-            "common_overviews": self._extract_common_overview(
-                response, current_time, property_obj.id
-            ),
+            "user_properties": user_property_dict,  # Pass dict instead of model
+            "property_overviews": property_overview,
+            "common_overviews": common_overview,
         }
