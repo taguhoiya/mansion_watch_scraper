@@ -88,6 +88,36 @@ class MansionWatchSpider(scrapy.Spider):
         property_name_xpath = f'normalize-space(//tr[th/div[contains(text(), "{ElementKeys.PROPERTY_NAME.value}")]]/td)'
         return response.xpath(property_name_xpath).get()
 
+    def _extract_large_prop_desc(self, response: Response) -> Optional[str]:
+        """Extract the property description from the response.
+
+        Args:
+            response: Scrapy response object
+        Returns:
+            The property description if found, None otherwise
+        """
+        large_prop_desc_xpath = (
+            'normalize-space(//*[@id="mainContents"]/div[2]/div/div[1]/h3)'
+        )
+        return response.xpath(large_prop_desc_xpath).get()
+
+    def _extract_small_prop_desc(self, response: Response) -> Optional[str]:
+        """Extract the property description from the response.
+
+        Args:
+            response: Scrapy response object
+        Returns:
+            The property description if found, None otherwise
+        """
+        small_prop_desc_xpath = '//*[@id="mainContents"]/div[2]/div/div[1]/p'
+        desc = response.xpath(small_prop_desc_xpath).get()
+        if desc:
+            # Replace closing p tag first to avoid issues
+            desc = desc.replace("</p>", "")
+            # Remove opening p tag with any attributes
+            desc = desc.replace(desc[desc.find("<p") : desc.find(">") + 1], "")
+        return desc
+
     def _extract_image_urls(self, response: Response) -> List[str]:
         """Extract property image URLs.
 
@@ -195,6 +225,8 @@ class MansionWatchSpider(scrapy.Spider):
         property_dict = {
             "name": property_name if property_name else "物件名不明",
             "url": response.url,
+            "large_property_description": self._extract_large_prop_desc(response),
+            "small_property_description": self._extract_small_prop_desc(response),
             "is_active": bool(property_name),
             "created_at": current_time,
             "updated_at": current_time,
