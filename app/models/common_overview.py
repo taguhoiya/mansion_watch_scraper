@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -26,9 +25,6 @@ from app.models.id import PyObjectId
 
 
 class CommonOverview(BaseModel):
-    id: Optional[PyObjectId] = Field(
-        alias="_id", default=None, title="the id of the common overview"
-    )
     location: str = Field(..., title="the location of the common overview")
     transportation: list[str] = Field(
         ..., title="the transportation of the common overview"
@@ -43,7 +39,7 @@ class CommonOverview(BaseModel):
     updated_at: datetime = Field(..., title="the update date of the common overview")
     property_id: PyObjectId = Field(..., title="the id of the property")
 
-    @field_validator("id", "property_id")
+    @field_validator("property_id")
     def validate_object_id(cls, v):
         return PyObjectId(v)
 
