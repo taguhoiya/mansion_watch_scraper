@@ -46,8 +46,8 @@ async def get_property_watchlist(
     """
     try:
         return await service.get_user_watchlist(line_user_id)
+    except HTTPException as e:
+        raise e
     except Exception as e:
         logger.error(f"Error fetching properties for user {line_user_id}: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="An error occurred while fetching the watchlist"
-        )
+        raise HTTPException(status_code=500, detail=str(e))

@@ -2,6 +2,7 @@ import os
 from typing import List
 
 from bson import ObjectId
+from fastapi import HTTPException
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.models.apis.watchlist import UserWatchlist
@@ -33,7 +34,7 @@ class WatchlistService:
         ).to_list(length=None)
 
         if not user_props:
-            return []
+            raise HTTPException(status_code=404, detail="User properties not found")
 
         property_ids = [prop["property_id"] for prop in user_props]
         properties = await self.coll_props.find({"_id": {"$in": property_ids}}).to_list(

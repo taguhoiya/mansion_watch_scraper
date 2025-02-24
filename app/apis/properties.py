@@ -159,9 +159,8 @@ async def get_property_by_id(property_id: str):
 
         return result
 
+    except HTTPException as e:
+        raise e
     except Exception as e:
-        if isinstance(e, HTTPException):
-            raise e
-        else:
-            logger.error(f"Error fetching property: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error fetching property: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
