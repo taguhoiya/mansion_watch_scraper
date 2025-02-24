@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import List
+from typing import Dict, List, Union
 
 from bson import ObjectId
 from fastapi import APIRouter, HTTPException
@@ -107,7 +107,7 @@ async def get_property(url: str = None, line_user_id: str = None):
     "/properties/{property_id}",
     summary="Get the property information by property id",
     response_description="The property information",
-    # response_model=Property,
+    response_model=Dict[str, Union[Property, PropertyOverview, CommonOverview]],
     response_model_by_alias=False,
 )
 async def get_property_by_id(property_id: str):
