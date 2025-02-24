@@ -74,9 +74,11 @@ async def get_property(url: str = None, line_user_id: str = None):
     Get the property information.
     Either url or line_user_id must be provided.
     """
+    # Guard clause for required parameters
     if not url and not line_user_id:
         raise HTTPException(
-            status_code=400, detail="Either url or line_user_id must be provided"
+            status_code=400,
+            detail="Either url or line_user_id must be provided",
         )
 
     try:
@@ -92,15 +94,23 @@ async def get_property(url: str = None, line_user_id: str = None):
             properties = await _get_properties_by_user(
                 line_user_id, coll_user_prop, coll_prop
             )
-        elif url:
-            properties = await _get_properties_by_url(url, coll_prop)
         else:
-            properties = []
+            properties = await _get_properties_by_url(url, coll_prop)
+
+        if not properties:
+            raise HTTPException(
+                status_code=404,
+                detail="No properties found with the given criteria",
+            )
+
+        return properties
+
     except Exception as e:
         logger.error(f"Error fetching properties: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-    return properties
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while fetching properties",
+        )
 
 
 @router.get(
@@ -113,13 +123,18 @@ async def get_property(url: str = None, line_user_id: str = None):
 async def get_property_by_id(property_id: str):
     """Get the property information by property id."""
     try:
+        # Validate ObjectId format first
+        if not ObjectId.is_valid(property_id):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid property_id format. Must be a 24-character hex string",
+            )
+
+        obj_id = ObjectId(property_id)
         db = get_db()
         coll_prop = db[collection_properties]
         coll_prop_ov = db[collection_property_overviews]
         coll_prop_commom_ov = db[collection_common_overviews]
-
-        # Convert string ID to ObjectId for queries
-        obj_id = ObjectId(property_id)
 
         # Query with ObjectId but convert to string in response
         prop: Property = await coll_prop.find_one({"_id": obj_id})
@@ -145,5 +160,8 @@ async def get_property_by_id(property_id: str):
         return result
 
     except Exception as e:
-        logger.error(f"Error fetching property: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        if isinstance(e, HTTPException):
+            raise e
+        else:
+            logger.error(f"Error fetching property: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
