@@ -7,70 +7,87 @@ from app.models.id import PyObjectId
 
 
 class UserProperty(BaseModel):
-    line_user_id: str = Field(..., title="the user id from LINE")
-    property_id: PyObjectId = Field(..., title="the id of the property")
+    """Model representing a user's property subscription for aggregation."""
+
+    id: Optional[PyObjectId] = Field(
+        default=None,
+        alias="_id",
+        description="User property ID",
+    )
+    line_user_id: str = Field(..., description="User ID from LINE platform")
+    property_id: PyObjectId = Field(..., description="ID of the property being tracked")
     last_aggregated_at: datetime = Field(
-        ..., title="the last aggregated time, which is the start of aggregated time"
+        ..., description="Start time of the last aggregation period"
     )
     next_aggregated_at: datetime = Field(
         ...,
-        title="the next aggregated time, which is 3 days later from the last aggregated time",
+        description="Scheduled time for the next aggregation (typically 3 days after last_aggregated_at)",
     )
     first_succeeded_at: Optional[datetime] = Field(
         default=None,
-        title="the first succeeded time of aggregation, which is the created time",
+        description="Timestamp of first successful aggregation (creation time)",
     )
     last_succeeded_at: Optional[datetime] = Field(
         default=None,
-        title="the last succeeded time of aggregation, which is the end of aggregated time",
+        description="Timestamp of most recent successful aggregation",
     )
 
     @field_validator("property_id")
+    @classmethod
     def validate_object_id(cls, v) -> PyObjectId:
-        """Validate and convert object IDs."""
+        """Convert and validate property ID as ObjectId."""
         return PyObjectId(v)
 
     @field_validator("line_user_id")
     def validate_line_user_id(cls, line_user_id: str) -> str:
-        """Validate that line_user_id starts with 'U'."""
+        """Ensure LINE user ID follows the expected format."""
         if not line_user_id.startswith("U"):
-            raise ValueError("line_user_id must start with U")
+            raise ValueError("LINE user ID must start with 'U'")
         return line_user_id
 
+    @field_validator("next_aggregated_at")
+    def validate_next_aggregation_time(
+        cls, next_time: datetime, values: dict
+    ) -> datetime:
+        """Ensure next_aggregated_at is after last_aggregated_at."""
+        last_time = values.data.get("last_aggregated_at")
+        if last_time and next_time <= last_time:
+            raise ValueError(
+                "Next aggregation time must be later than last aggregation time"
+            )
+        return next_time
+
     @field_validator("last_succeeded_at")
-    def validate_succeeded_timestamps(
-        cls, last_succeeded_at: Optional[datetime], values: dict
+    def validate_success_timestamps(
+        cls, last_success: Optional[datetime], values: dict
     ) -> Optional[datetime]:
-        """Validate that last_succeeded_at is between first_succeeded_at and last_aggregated_at."""
-        if last_succeeded_at is None:
+        """Validate timestamp relationships for successful aggregations."""
+        if last_success is None:
             return None
 
-        first_succeeded_at = values.data.get("first_succeeded_at")
-        last_aggregated_at = values.data.get("last_aggregated_at")
+        first_success = values.data.get("first_succeeded_at")
+        last_aggregated = values.data.get("last_aggregated_at")
 
-        if first_succeeded_at and last_succeeded_at <= first_succeeded_at:
+        # Validate against first_succeeded_at
+        if first_success and last_success < first_success:
             raise ValueError(
-                "last_succeeded_at must be equal to or later than first_succeeded_at"
+                "Last success time cannot be earlier than first success time"
             )
-        elif last_aggregated_at and last_aggregated_at <= last_succeeded_at:
+
+        # Validate against last_aggregated_at
+        if last_aggregated and last_success > last_aggregated:
             raise ValueError(
-                "last_succeeded_at must be equal to or earlier than last_aggregated_at"
+                "Last success time cannot be later than last aggregation time"
             )
-        return last_succeeded_at
 
-    @field_validator("next_aggregated_at")
-    def validate_aggregated_times(
-        cls, next_aggregated_at: datetime, values: dict
-    ) -> datetime:
-        """Validate that next_aggregated_at is after last_aggregated_at."""
-        last_aggregated_at = values.data.get("last_aggregated_at")
-        if last_aggregated_at and next_aggregated_at <= last_aggregated_at:
-            raise ValueError("next_aggregated_at must be later than last_aggregated_at")
-        return next_aggregated_at
+        return last_success
 
-    class Config:
-        json_schema_extra = {
+    model_config = {
+        "populate_by_name": True,
+        "arbitrary_types_allowed": True,
+        "json_schema_extra": {
             "example": {
+                "_id": "679f48bb824469aa5fc15392",
                 "line_user_id": "U23b619197d01bab29b2c54955db6c2a1",
                 "property_id": "679f48bb824469aa5fc15392",
                 "last_aggregated_at": "2021-01-01T01:00:00",
@@ -78,4 +95,5 @@ class UserProperty(BaseModel):
                 "first_succeeded_at": "2021-01-01T00:00:00",
                 "last_succeeded_at": "2021-01-01T02:00:00",
             }
-        }
+        },
+    }

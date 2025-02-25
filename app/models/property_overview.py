@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from app.models.id import PyObjectId
 
@@ -35,43 +36,42 @@ from app.models.id import PyObjectId
 
 
 class PropertyOverview(BaseModel):
-    sales_schedule: str = Field(..., title="the sales schedule")
-    event_information: str = Field(..., title="the event information")
-    number_of_units_for_sale: str = Field(..., title="the number of units for sale")
-    highest_price_range: str = Field(..., title="the highest price range")
-    price: str = Field(..., title="the price")
-    maintenance_fee: str = Field(..., title="the maintenance fee")
-    repair_reserve_fund: str = Field(..., title="the repair reserve fund")
-    first_repair_reserve_fund: str = Field(..., title="the first repair reserve fund")
-    other_expenses: str = Field(..., title="the other expenses")
-    floor_plan: str = Field(..., title="the floor plan")
-    area: str = Field(..., title="the area")
-    other_area: str = Field(..., title="the other area")
-    delivery_time: str = Field(..., title="the delivery time")
-    completion_time: str = Field(..., title="the completion time")
-    floor: str = Field(..., title="the floor")
-    direction: str = Field(..., title="the direction")
+    id: Optional[PyObjectId] = Field(
+        default=None,
+        alias="_id",
+        description="Property overview ID",
+    )
+    sales_schedule: str = Field(..., description="Sales schedule")
+    event_information: str = Field(..., description="Event information")
+    number_of_units_for_sale: str = Field(..., description="Number of units for sale")
+    highest_price_range: str = Field(..., description="Highest price range")
+    price: str = Field(..., description="Property price")
+    maintenance_fee: str = Field(..., description="Maintenance fee")
+    repair_reserve_fund: str = Field(..., description="Repair reserve fund")
+    first_repair_reserve_fund: str = Field(..., description="First repair reserve fund")
+    other_expenses: str = Field(..., description="Other expenses")
+    floor_plan: str = Field(..., description="Floor plan")
+    area: str = Field(..., description="Property area")
+    other_area: str = Field(..., description="Additional area information")
+    delivery_time: str = Field(..., description="Delivery time")
+    completion_time: str = Field(..., description="Completion time")
+    floor: str = Field(..., description="Floor number")
+    direction: str = Field(..., description="Direction/orientation")
     energy_consumption_performance: str = Field(
-        ..., title="the energy consumption performance"
+        ..., description="Energy consumption performance"
     )
-    insulation_performance: str = Field(..., title="the insulation performance")
-    estimated_utility_cost: str = Field(..., title="the estimated utility cost")
-    renovation: str = Field(..., title="the renovation")
-    other_restrictions: str = Field(..., title="the other restrictions")
+    insulation_performance: str = Field(..., description="Insulation performance")
+    estimated_utility_cost: str = Field(..., description="Estimated utility cost")
+    renovation: str = Field(..., description="Renovation information")
+    other_restrictions: str = Field(..., description="Other restrictions")
     other_overview_and_special_notes: str = Field(
-        ..., title="the other overview and special notes"
+        ..., description="Other overview and special notes"
     )
-    created_at: datetime = Field(
-        ..., title="the date and time the property was created"
+    created_at: datetime = Field(..., description="Record creation timestamp")
+    updated_at: datetime = Field(..., description="Record last update timestamp")
+    property_id: Optional[PyObjectId] = Field(
+        default=None, description="Associated property ID"
     )
-    updated_at: datetime = Field(
-        ..., title="the date and time the property was last updated"
-    )
-    property_id: PyObjectId = Field(..., title="the id of the property")
-
-    @field_validator("property_id")
-    def validate_object_id(cls, v):
-        return PyObjectId(v)
 
     @model_validator(mode="after")
     def validate_timestamps(cls, model: "PropertyOverview") -> "PropertyOverview":
@@ -79,8 +79,10 @@ class PropertyOverview(BaseModel):
             raise ValueError("updated_at must be equal to or later than created_at")
         return model
 
-    class Config:
-        json_schema_extra = {
+    model_config = {
+        "populate_by_name": True,
+        "arbitrary_types_allowed": True,
+        "json_schema_extra": {
             "example": {
                 "id": "679f48bb824469aa5fc15392",
                 "sales_schedule": "-",
@@ -106,8 +108,11 @@ class PropertyOverview(BaseModel):
                 "other_restrictions": "※所在階：2階・3階 ※上記バルコニー向きはルーフテラスの向きになります。 ●ルーフテラス面積／約40.31平米（約12.19坪）：使用料無償 （上記ルーフテラス面積については計画概要に基づく面積です。） ●専用駐輪場／有：使用料無償（令和6年5月11日現在） ●ペットの飼育については別途ペット使用細則を遵守していただきます。 ●間取図の畳数表記（J）は1畳＝1.62平米で換算した約表示です。 ●略号凡例：Sto.／収納、R／冷蔵庫置場",
                 "other_overview_and_special_notes": "担当者：大野博史",
                 "created_at": "2025-02-02T19:28:11.628Z",
+                "updated_at": "2025-02-02T19:28:11.628Z",
+                "property_id": "679f48bb824469aa5fc15391",
             }
-        }
+        },
+    }
 
 
 # The difference between 修繕積立金 and 修繕積立基金 is explained in https://suumo.jp/article/oyakudachi/oyaku/ms_shinchiku/ms_money/ms_shuzentsumitatekikin/
