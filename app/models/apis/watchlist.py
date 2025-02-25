@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.models.id import PyObjectId
 
 # [
 #   {
@@ -35,11 +37,12 @@ class UserWatchlist(BaseModel):
     Represents a user's property watchlist item with detailed property information.
     """
 
+    id: PyObjectId = Field(alias="_id", description="Property ID")
     name: str = Field(..., description="Property name")
     url: str = Field(..., description="Property listing URL")
     is_active: bool = Field(..., description="Whether the listing is currently active")
 
-    # Optional property details
+    # Property details
     large_property_description: Optional[str] = Field(
         None, description="High-level property features"
     )
@@ -47,7 +50,7 @@ class UserWatchlist(BaseModel):
         None, description="Detailed property description"
     )
     image_urls: Optional[List[str]] = Field(
-        None, description="List of property image URLs"
+        default_factory=list, description="List of property image URLs"
     )
 
     # Required property details
@@ -65,10 +68,17 @@ class UserWatchlist(BaseModel):
     created_at: datetime = Field(..., description="Record creation timestamp")
     updated_at: datetime = Field(..., description="Record last update timestamp")
 
-    class Config:
-        """Pydantic model configuration with example data"""
+    @field_validator("url")
+    def validate_url(cls, url: str) -> str:
+        """Validate that the URL is from SUUMO."""
+        if not url.startswith("https://suumo.jp"):
+            raise ValueError("URL must start with https://suumo.jp")
+        return url
 
-        json_schema_extra = {
+    model_config = {
+        "populate_by_name": True,
+        "arbitrary_types_allowed": True,
+        "json_schema_extra": {
             "example": {
                 "name": "ロクタス",
                 "url": "https://suumo.jp/ms/chuko/tokyo/sc_meguro/nc_75709932/",
@@ -98,4 +108,5 @@ class UserWatchlist(BaseModel):
                 "created_at": "2025-02-24T20:21:37.683000",
                 "updated_at": "2025-02-24T20:21:37.683000",
             }
-        }
+        },
+    }
