@@ -415,7 +415,7 @@ def process_image(image_file: str) -> io.BytesIO:
             img = img.convert("RGB")
 
         # Use a fixed quality setting for JPEG compression
-        quality = int(os.getenv("GCS_IMAGE_QUALITY", "85"))
+        quality = int(os.getenv("GCS_IMAGE_QUALITY", "50"))
         buffer = io.BytesIO()
         img.save(buffer, format="JPEG", quality=quality, optimize=True)
         buffer.seek(0)  # Reset buffer position to beginning
