@@ -18,3 +18,10 @@ google-cloud-storage
 # for local development
 ngrok
 loguru
+
+# for testing
+pytest
+pytest-asyncio
+pytest-cov
+pytest-mock
+httpx
