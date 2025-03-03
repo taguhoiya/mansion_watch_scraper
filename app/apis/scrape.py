@@ -1,48 +1,121 @@
-import subprocess
+import asyncio
+import logging
+from typing import Any, Dict, List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, status
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+async def execute_scrapy_command(command: List[str]) -> Dict[str, str]:
+    """
+    Execute a Scrapy command as an async subprocess and return the results.
+
+    Args:
+        command: List of command parts to execute
+
+    Returns:
+        Dictionary containing stdout and stderr output
+
+    Raises:
+        asyncio.SubprocessError: If subprocess execution fails
+    """
+    process = await asyncio.create_subprocess_exec(
+        *command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
+
+    logger.info(f"Executing command: {' '.join(command)}")
+    stdout, stderr = await process.communicate()
+
+    logger.info(f"Command completed with return code: {process.returncode}")
+    logger.info(f"Standard output: {stdout.decode()}")
+    logger.info(f"Standard error: {stderr.decode()}")
+
+    return {
+        "returncode": process.returncode,
+        "stdout": stdout.decode(),
+        "stderr": stderr.decode(),
+    }
+
+
+def build_scrapy_command(url: str, line_user_id: str) -> List[str]:
+    """
+    Build the Scrapy command with the given parameters.
+
+    Args:
+        url: The URL of the apartment to scrape
+        line_user_id: The LINE user ID for notification
+
+    Returns:
+        List of command parts
+    """
+    return [
+        "scrapy",
+        "runspider",
+        "mansion_watch_scraper/spiders/suumo_scraper.py",
+        "-a",
+        f"url={url}",
+        "-a",
+        f"line_user_id={line_user_id}",
+    ]
 
 
 @router.get("/scrape", summary="Scrape the given apartment URL asynchronously")
-async def start_scrapy(url: str, line_user_id: str):
+async def start_scrapy(url: str, line_user_id: str) -> Dict[str, Any]:
     """
     Scrape the given apartment URL asynchronously using Scrapy.
-    url: str: The URL of the apartment to scrape.
-    """
-    try:
-        # Define the Scrapy command
-        command = [
-            "scrapy",
-            "runspider",
-            "mansion_watch_scraper/spiders/suumo_scraper.py",
-            "-a",
-            f"url={url}",
-            "-a",
-            f"line_user_id={line_user_id}",
-        ]
 
-        # Run Scrapy as a subprocess
-        process = subprocess.Popen(
-            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    Args:
+        url: The URL of the apartment to scrape
+        line_user_id: The LINE user ID for notification
+
+    Returns:
+        Dictionary with scraping results
+
+    Raises:
+        HTTPException: If scraping fails
+    """
+    if not url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="URL parameter is required"
         )
 
-        # Wait for the process to complete
-        stdout, stderr = process.communicate()
+    if not line_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="LINE user ID parameter is required",
+        )
 
-        # Capture the output and error messages
-        if process.returncode != 0:
+    try:
+        command = build_scrapy_command(url, line_user_id)
+        logger.info(f"Starting Scrapy process for URL: {url}")
+
+        result = await execute_scrapy_command(command)
+
+        if result["returncode"] != 0:
+            logger.error(f"Scrapy process failed: {result['stderr']}")
             raise HTTPException(
-                status_code=500, detail=f"Scrapy error: {stderr.decode()}"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Scrapy error: {result['stderr']}",
             )
 
-        # Return the result or logs from the Scrapy process
+        logger.info(f"Scrapy process completed successfully for URL: {url}")
         return {
             "message": "Scrapy crawl and db insert completed successfully",
-            "output": stdout.decode(),
-            "error": stderr.decode(),
+            "output": result["stdout"],
+            "error": result["stderr"],
         }
 
+    except asyncio.SubprocessError as e:
+        logger.exception(f"Subprocess error while running Scrapy: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Subprocess error: {str(e)}",
+        )
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        logger.exception(f"Unexpected error during scraping: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error: {str(e)}"
+        )
