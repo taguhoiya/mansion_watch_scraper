@@ -26,3 +26,15 @@ scrape: ## Run the scraper.
 .PHONY: ngrok
 ngrok: ## Start ngrok.
 	ngrok http http://localhost:8080
+
+.PHONY: test
+test: ## Run the tests.
+	python -W ignore -m pytest tests/unit/ -v
+
+.PHONY: test-cov
+test-cov: ## Run the tests with coverage report.
+	python -W ignore -m pytest tests/unit/ -v --cov=app --cov-report=term-missing
+
+.PHONY: test-docker
+test-docker: ## Run the tests in the docker container.
+	docker compose exec mansion_watch_scraper python -W ignore -m pytest tests/unit/ -v || true
