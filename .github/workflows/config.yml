@@ -36,8 +36,17 @@ jobs:
       - name: Lint with flake8
         run: flake8 .
 
-      - name: Run tests
+      - name: Run tests with coverage
         run: make test-cov
+        # The test will fail if coverage is below 50% due to --cov-fail-under=50 in pytest.ini
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
 
   # deploy:
   #   if: github.ref == 'refs/heads/main'

@@ -49,6 +49,7 @@ make test-docker
 - Tests are configured to use function-scoped event loops for better isolation
 - All tests run successfully in both local and Docker environments
 - Current test coverage is approximately 66%
+- Minimum required test coverage is set to 50% (CI will fail if coverage drops below this threshold)
 - Warnings are suppressed in Docker test runs using Python's `-W ignore` flag
 - A custom fixture in conftest.py handles asyncio event loop cleanup properly
 - All fixtures have proper type annotations and descriptive docstrings
@@ -78,3 +79,35 @@ make test-docker
 #### Test Exclusions in Docker
 
 Some tests related to subprocess execution are excluded when running in Docker due to environment differences. These tests are still run in the local environment to ensure full coverage
+
+## CI/CD
+
+This project uses GitHub Actions for continuous integration and deployment.
+
+### CI Workflow
+
+The CI workflow runs on every push to the main branch and on pull requests. It performs the following checks:
+
+1. **Linting**: Runs isort, black, and flake8 to ensure code quality
+2. **Testing**: Runs all unit tests with coverage reporting
+3. **Coverage Check**: Ensures that test coverage is at least 50%
+4. **Coverage Report**: Uploads coverage reports to Codecov for visualization
+
+If any of these checks fail, the CI workflow will fail, preventing merges to the main branch.
+
+### Setting Up Codecov
+
+To enable the Codecov integration:
+
+1. Sign up for a free account at [codecov.io](https://codecov.io/)
+2. Add your repository to Codecov
+3. Generate a Codecov token
+4. Add the token as a secret in your GitHub repository settings with the name `CODECOV_TOKEN`
+
+### Customizing Coverage Thresholds
+
+The minimum coverage threshold is set to 50% in the `pytest.ini` file. To change this:
+
+1. Open `pytest.ini`
+2. Modify the `--cov-fail-under=50` value in the `addopts` line
+3. Commit and push the changes

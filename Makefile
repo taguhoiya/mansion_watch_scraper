@@ -33,7 +33,7 @@ test: ## Run the tests.
 
 .PHONY: test-cov
 test-cov: ## Run the tests with coverage report.
-	python -W ignore -m pytest tests/unit/ -v --cov=app --cov-report=term-missing
+	python -W ignore -m pytest tests/unit/ -v
 
 .PHONY: test-docker
 test-docker: ## Run the tests in the docker container.
