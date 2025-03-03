@@ -40,10 +40,9 @@ jobs:
         run: make test-cov
         # The test will fail if coverage is below 50% due to --cov-fail-under=50 in pytest.ini
 
-      - name: Upload coverage reports to Codecov
+      - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
-          file: ./coverage.xml
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
