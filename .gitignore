@@ -8,3 +8,8 @@ eggs/
 
 # Ignore the google service account file
 service-account.json
+
+# Coverage files
+.coverage
+coverage.xml
+htmlcov/
