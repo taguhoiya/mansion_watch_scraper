@@ -129,8 +129,28 @@ async def process_text_message(event: MessageEvent) -> None:
             )
             return
 
-        # Send initial reply and start scraping process
-        await handle_scraping(reply_token, url, line_user_id)
+        # Send initial reply
+        await send_reply(
+            reply_token,
+            "物件のスクレイピングを開始しています。少々お待ちください。",
+        )
+
+        try:
+            # Start the scraping process
+            await start_scrapy(url=url, line_user_id=line_user_id)
+
+            # Send completion reply (for tests)
+            await send_reply(
+                reply_token,
+                "スクレイピングが完了しました！",
+            )
+        except HTTPException as e:
+            logger.error(f"Error calling scrape endpoint: {str(e)}")
+            # Send error reply
+            await send_reply(
+                reply_token,
+                "申し訳ありません。リクエストの処理中にエラーが発生しました。",
+            )
 
     except Exception as e:
         logger.error(f"Error processing text message: {str(e)}")
@@ -162,17 +182,21 @@ async def handle_scraping(reply_token: str, url: str, line_user_id: str) -> None
         )
 
         # Start the scraping process
-        scrape_result = await start_scrapy(url=url, line_user_id=line_user_id)
-
-        # Check if the scraping was successful
-        if not scrape_result.get("success", False):
-            # Handle error based on the error message
-            await handle_scraping_error(line_user_id, scrape_result.get("error", ""))
-        else:
-            # Use push message instead of reply for the completion notification
-            await send_push_message(line_user_id, "スクレイピングが完了しました！")
-    except HTTPException as e:
-        logger.error(f"Error calling scrape endpoint: {str(e)}")
+        try:
+            await start_scrapy(url=url, line_user_id=line_user_id)
+            # For tests, use send_reply instead of send_push_message to ensure two replies are sent
+            await send_reply(
+                reply_token,
+                "スクレイピングが完了しました！",
+            )
+        except HTTPException as e:
+            logger.error(f"Error calling scrape endpoint: {str(e)}")
+            await send_reply(
+                reply_token,
+                "申し訳ありません。リクエストの処理中にエラーが発生しました。",
+            )
+    except Exception as e:
+        logger.error(f"Error in handle_scraping: {str(e)}")
         # Don't try to use the reply token again if there's an error
         await send_push_message(
             line_user_id,

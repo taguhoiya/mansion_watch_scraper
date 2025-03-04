@@ -106,14 +106,14 @@ async def start_scrapy(url: str, line_user_id: str) -> Dict[str, Any]:
             or "ERROR: Property name not found" in stderr
             or "ValidationError" in stderr
             or "pydantic_core._pydantic_core.ValidationError" in stderr
+            or result["returncode"]
+            != 0  # Check if the process returned a non-zero exit code
         ):
             logger.error(f"Scrapy process encountered errors: {stderr}")
-            return {
-                "message": "Scrapy process completed with errors",
-                "output": result["stdout"],
-                "error": stderr,
-                "success": False,
-            }
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Scrapy error: {stderr}",
+            )
 
         logger.info(f"Scrapy process completed successfully for URL: {url}")
         return {
