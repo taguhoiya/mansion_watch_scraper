@@ -52,9 +52,9 @@ ROBOTSTXT_OBEY = True
 
 # Enable or disable downloader middlewares
 # See https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
-# DOWNLOADER_MIDDLEWARES = {
-#    "mansion_watch_scraper.middlewares.MansionWatchScraperDownloaderMiddleware": 543,
-# }
+DOWNLOADER_MIDDLEWARES = {
+    "scrapy.spidermiddlewares.offsite.OffsiteMiddleware": None,
+}
 
 # Enable or disable extensions
 # See https://docs.scrapy.org/en/latest/topics/extensions.html
@@ -114,3 +114,10 @@ IMAGES_STORE = os.getenv("IMAGES_STORE")
 GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID")
 GCP_BUCKET_NAME = os.getenv("GCP_BUCKET_NAME")
 GCP_FOLDER_NAME = os.getenv("GCP_FOLDER_NAME")
+
+# Image pipeline settings
+IMAGES_URLS_FIELD = "image_urls"
+IMAGES_RESULT_FIELD = "images"
+
+# Allow image domains for downloading
+IMAGES_DOMAINS = ["img01.suumo.com", "img02.suumo.com", "img03.suumo.com"]

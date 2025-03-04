@@ -9,14 +9,12 @@ This module contains pipelines for:
 import io
 import logging
 import os
-import shutil
 from typing import Any, Dict, Optional, Tuple, TypeVar, Union
 
 import pymongo
 import scrapy
 from bson import ObjectId
 from google.cloud import storage
-from itemadapter import ItemAdapter
 from PIL import Image
 from pymongo.server_api import ServerApi
 from scrapy.exceptions import DropItem
@@ -455,6 +453,39 @@ def upload_to_gcs(
         return False
 
 
+def check_blob_exists(bucket: storage.bucket.Bucket, blob_name: str) -> bool:
+    """
+    Check if a blob exists in Google Cloud Storage.
+
+    Args:
+        bucket: GCS bucket
+        blob_name: Name of the blob to check
+
+    Returns:
+        True if blob exists, False otherwise
+    """
+    try:
+        blob = bucket.blob(blob_name)
+        return blob.exists()
+    except Exception as e:
+        logger.error(f"Error checking if blob {blob_name} exists: {e}")
+        return False
+
+
+def get_gcs_url(bucket_name: str, blob_name: str) -> str:
+    """
+    Generate a GCS URL for a blob.
+
+    Args:
+        bucket_name: Name of the GCS bucket
+        blob_name: Name of the blob
+
+    Returns:
+        GCS URL string
+    """
+    return f"gs://{bucket_name}/{blob_name}"
+
+
 class SuumoImagesPipeline(ImagesPipeline):
     """Pipeline for downloading, processing, and uploading images to Google Cloud Storage."""
 
@@ -483,6 +514,9 @@ class SuumoImagesPipeline(ImagesPipeline):
         self.storage_client = storage.Client()
         self.bucket = self.storage_client.bucket(self.gcp_bucket_name)
 
+        # Cache for storing image URL to GCS URL mapping
+        self.image_url_to_gcs_url = {}
+
     def close_spider(self, spider):
         """
         Clean up resources when spider closes.
@@ -494,6 +528,10 @@ class SuumoImagesPipeline(ImagesPipeline):
             self.client.close()
         if self.storage_client:
             self.storage_client.close()
+
+        # Clean up the tmp directory in one operation
+        self._cleanup_temp_directory()
+
         self.logger.info("Completed SuumoImagesPipeline")
 
     def file_path(self, request, response=None, info=None, *, item=None):
@@ -509,7 +547,27 @@ class SuumoImagesPipeline(ImagesPipeline):
         Returns:
             File path for the image
         """
-        return request.url.split("/")[-1]
+        import re
+        import urllib.parse
+
+        # Extract the src parameter from the URL if it exists
+        url = request.url
+        if "resizeImage?src=" in url:
+            # Parse the URL to get the query parameters
+            parsed_url = urllib.parse.urlparse(url)
+            query_params = urllib.parse.parse_qs(parsed_url.query)
+
+            # Get the src parameter and decode it
+            if "src" in query_params:
+                src = urllib.parse.unquote(query_params["src"][0])
+
+                # Extract the filename using regex
+                match = re.search(r"(\d+_\d+\.jpg)$", src)
+                if match:
+                    return match.group(1)
+
+        # Fallback to the last part of the URL if we can't extract a clean filename
+        return url.split("/")[-1]
 
     def get_media_requests(self, item, info):
         """
@@ -522,20 +580,330 @@ class SuumoImagesPipeline(ImagesPipeline):
         Returns:
             Iterator of Scrapy requests
         """
-        properties = item.get(PROPERTIES)
+        # Get image URLs from properties
+        image_urls = self._get_image_urls_from_item(item)
+        if not image_urls:
+            return []
 
+        # Get common headers for image requests
+        headers = self._get_request_headers()
+
+        # If GCS is not configured, download all images
+        if not self._is_gcs_configured():
+            return self._create_requests_for_all_images(image_urls, headers)
+
+        # Process each image URL with GCS check
+        return self._process_image_urls_with_gcs_check(image_urls, headers)
+
+    def _get_image_urls_from_item(self, item):
+        """
+        Extract image URLs from the item.
+
+        Args:
+            item: Scraped item
+
+        Returns:
+            List of image URLs or empty list if none found
+        """
+        properties = item.get(PROPERTIES)
         if not properties:
             self.logger.warning("No properties found in item")
             return []
 
         image_urls = properties.image_urls if hasattr(properties, "image_urls") else []
-
         if not image_urls:
             self.logger.warning("No image URLs found in item")
             return []
 
+        return image_urls
+
+    def _get_request_headers(self):
+        """
+        Get common headers for image requests.
+
+        Returns:
+            Dictionary of request headers
+        """
+        return {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+            "Referer": "https://suumo.jp/",
+        }
+
+    def _is_gcs_configured(self):
+        """
+        Check if GCS is properly configured.
+
+        Returns:
+            True if GCS is configured, False otherwise
+        """
+        return bool(self.bucket and self.folder_name)
+
+    def _create_requests_for_all_images(self, image_urls, headers):
+        """
+        Create requests for all image URLs without GCS check.
+
+        Args:
+            image_urls: List of image URLs
+            headers: Request headers
+
+        Returns:
+            Iterator of Scrapy requests
+        """
         for image_url in image_urls:
-            yield scrapy.Request(image_url)
+            yield from self._create_request_if_valid(image_url, headers)
+
+    def _process_image_urls_with_gcs_check(self, image_urls, headers):
+        """
+        Process image URLs with GCS existence check.
+
+        Args:
+            image_urls: List of image URLs
+            headers: Request headers
+
+        Returns:
+            Iterator of Scrapy requests
+        """
+        existing_images = []
+        for image_url in image_urls:
+            for request in self._process_single_image_url(
+                image_url, headers, existing_images
+            ):
+                yield request
+
+        # Log existing images as a chunk if any were found
+        if existing_images:
+            self.logger.info(f"{len(existing_images)} images already exist in GCS")
+
+    def _process_single_image_url(self, image_url, headers, existing_images=None):
+        """
+        Process a single image URL with GCS existence check.
+
+        Args:
+            image_url: Image URL
+            headers: Request headers
+            existing_images: Optional list to collect existing image URLs
+
+        Returns:
+            Iterator of Scrapy requests
+        """
+        try:
+            # Skip invalid URLs
+            if not self._is_valid_url(image_url):
+                return
+
+            # Determine the filename that would be used
+            filename = self._get_filename_from_url(image_url)
+            if not filename:
+                self.logger.warning(
+                    f"Could not determine filename for URL: {image_url}"
+                )
+                yield from self._create_request_if_valid(image_url, headers)
+                return
+
+            # Check if the image already exists in GCS
+            destination_blob_name = f"{self.folder_name}/{filename}"
+            if check_blob_exists(self.bucket, destination_blob_name):
+                # Image already exists in GCS, store the GCS URL in cache
+                gcs_url = get_gcs_url(self.gcp_bucket_name, destination_blob_name)
+                self.image_url_to_gcs_url[image_url] = gcs_url
+
+                # Add to existing_images list instead of logging individually
+                if existing_images is not None:
+                    existing_images.append(gcs_url)
+                return
+
+            # Image doesn't exist in GCS, create a request to download it
+            yield from self._create_request_if_valid(image_url, headers)
+        except Exception as e:
+            self.logger.error(f"Error processing URL {image_url}: {e}")
+
+    def _is_valid_url(self, url):
+        """
+        Check if a URL is valid.
+
+        Args:
+            url: URL to check
+
+        Returns:
+            True if URL is valid, False otherwise
+        """
+        if not url or not isinstance(url, str):
+            self.logger.warning(f"Invalid image URL: {url}")
+            return False
+
+        url = url.strip()
+        if not url:
+            return False
+
+        return True
+
+    def _create_request_if_valid(self, image_url, headers):
+        """
+        Create a request for a valid image URL.
+
+        Args:
+            image_url: URL of the image
+            headers: Request headers
+
+        Returns:
+            Iterator of Scrapy requests
+        """
+        try:
+            if not self._is_valid_url(image_url):
+                return
+
+            yield scrapy.Request(
+                url=image_url,
+                headers=headers,
+                meta={"dont_retry": True, "download_timeout": 30},
+                dont_filter=True,  # Important: Bypass the OffsiteMiddleware filter
+            )
+        except Exception as e:
+            self.logger.error(f"Error creating request for URL {image_url}: {e}")
+
+    def _get_filename_from_url(self, url):
+        """
+        Extract filename from URL using the same logic as file_path.
+
+        Args:
+            url: Image URL
+
+        Returns:
+            Extracted filename or None if extraction fails
+        """
+        try:
+            import re
+            import urllib.parse
+
+            # Extract the src parameter from the URL if it exists
+            if "resizeImage?src=" in url:
+                # Parse the URL to get the query parameters
+                parsed_url = urllib.parse.urlparse(url)
+                query_params = urllib.parse.parse_qs(parsed_url.query)
+
+                # Get the src parameter and decode it
+                if "src" in query_params:
+                    src = urllib.parse.unquote(query_params["src"][0])
+
+                    # Extract the filename using regex
+                    match = re.search(r"(\d+_\d+\.jpg)$", src)
+                    if match:
+                        return match.group(1)
+
+            # Fallback to the last part of the URL
+            return url.split("/")[-1]
+        except Exception as e:
+            self.logger.error(f"Error extracting filename from URL {url}: {e}")
+            return None
+
+    def _process_failed_downloads(self, failed_downloads):
+        """Process and log failed downloads."""
+        if failed_downloads:
+            self.logger.warning(f"Failed to download {len(failed_downloads)} images")
+            for failure in failed_downloads:
+                if isinstance(failure, Exception):
+                    self.logger.warning(f"Download failure: {str(failure)}")
+
+    def _upload_image_to_gcs(self, image_path):
+        """Upload a single image to GCS and return the GCS URL if successful."""
+        try:
+            # Construct local file path
+            local_file = os.path.join(self.images_store, image_path)
+
+            # Construct GCS destination path
+            destination_blob_name = f"{self.folder_name}/{image_path}"
+
+            # Upload to GCS
+            success = upload_to_gcs(self.bucket, local_file, destination_blob_name)
+
+            if success:
+                # Construct GCS URL
+                gcs_url = f"gs://{self.gcp_bucket_name}/{destination_blob_name}"
+                return gcs_url
+            return None
+        except Exception as e:
+            self.logger.error(f"Error uploading image {image_path} to GCS: {e}")
+            return None
+
+    def _cleanup_temp_directory(self, directory=None):
+        """
+        Clean up temporary directory by removing all files and the directory itself.
+
+        Args:
+            directory: Directory to clean up. If None, uses self.images_store
+
+        Returns:
+            bool: True if cleanup was successful, False otherwise
+        """
+        try:
+            target_dir = directory or self.images_store
+            if not target_dir or not os.path.exists(target_dir):
+                return False
+
+            # Use shutil.rmtree for efficient recursive directory removal
+            import shutil
+
+            shutil.rmtree(target_dir)
+            self.logger.info(f"Cleaned up temporary directory: {target_dir}")
+            return True
+        except Exception as e:
+            self.logger.error(
+                f"Error cleaning up temporary directory {target_dir}: {e}"
+            )
+            return False
+
+    def _process_successful_downloads(self, image_paths, property_id):
+        """Process successful downloads and upload to GCS."""
+        # Upload images to GCS if configured
+        if not (self.bucket and self.folder_name):
+            return []
+
+        # Upload each image to GCS and collect URLs
+        gcs_image_urls = [
+            url
+            for url in (self._upload_image_to_gcs(path) for path in image_paths)
+            if url
+        ]
+
+        self.logger.info(f"Uploaded {len(gcs_image_urls)} images to GCS")
+
+        # No need to clean up individual files here - we'll clean up everything at once later
+        return gcs_image_urls
+
+    def _log_image_processing_results(
+        self, original_image_count, existing_image_count, new_gcs_urls, failed_downloads
+    ):
+        """
+        Log image processing results based on what actually happened.
+
+        Args:
+            original_image_count: Total number of original image URLs
+            existing_image_count: Number of images that already existed in GCS
+            new_gcs_urls: List of newly uploaded GCS URLs
+            failed_downloads: List of failed downloads
+        """
+        if new_gcs_urls:
+            if existing_image_count > 0:
+                # Mix of existing and new images
+                self.logger.info(
+                    f"Updated item with {existing_image_count + len(new_gcs_urls)} GCS image URLs "
+                    f"({existing_image_count} already existed, {len(new_gcs_urls)} newly uploaded)"
+                )
+            else:
+                # Only new images
+                self.logger.info(
+                    f"Updated item with {len(new_gcs_urls)} newly uploaded GCS image URLs"
+                )
+        elif existing_image_count > 0 and original_image_count > existing_image_count:
+            # Some images existed but others failed to download/upload
+            self.logger.info(
+                f"Partial update: {existing_image_count} of {original_image_count} "
+                f"images already existed in GCS, {original_image_count - existing_image_count - len(failed_downloads)} "
+                f"failed to process"
+            )
+        # No log if all images already existed (to avoid confusion)
 
     def item_completed(self, results, item, info):
         """
@@ -548,56 +916,62 @@ class SuumoImagesPipeline(ImagesPipeline):
 
         Returns:
             Processed item
-
-        Raises:
-            DropItem: If item processing fails
         """
         try:
-            # Gather successful image paths
-            image_paths = [res["path"] for ok, res in results if ok]
-
-            if not image_paths:
-                raise DropItem("Item contains no images")
-
-            # Process each image
-            successful_uploads = []
-            for image_path in image_paths:
-                local_file = os.path.join(self.images_store, image_path)
-                blob_path = f"{self.folder_name}/{image_path}"
-
-                if upload_to_gcs(self.bucket, local_file, blob_path):
-                    successful_uploads.append(image_path)
-                else:
-                    self.logger.warning(f"Failed to upload image: {blob_path}")
-
-            # Clean up temporary files
-            if os.path.isdir("tmp"):
-                shutil.rmtree("tmp", ignore_errors=True)
-
-            # Update item with successful uploads
+            # Get properties from item
             properties = item.get(PROPERTIES)
-
             if not properties:
                 return item
 
-            gcs_urls = [
-                f"https://storage.cloud.google.com/{self.gcp_bucket_name}/{self.folder_name}/{path}"
-                for path in successful_uploads
-            ]
+            # Get original image URLs
+            original_image_urls = (
+                properties.image_urls if hasattr(properties, "image_urls") else []
+            )
+            if not original_image_urls:
+                return item
 
-            if isinstance(properties, dict):
-                properties.pop("image_urls", None)
-                properties["image_urls"] = gcs_urls
-            else:
-                # Handle Pydantic model
-                setattr(properties, "image_urls", gcs_urls)
+            # Gather successful image paths
+            image_paths = [res["path"] for ok, res in results if ok]
 
-            item[PROPERTIES] = properties
-            adapter = ItemAdapter(item)
-            adapter["image_paths"] = successful_uploads
+            # Process failed downloads
+            failed_downloads = [res for ok, res in results if not ok]
+            self._process_failed_downloads(failed_downloads)
+
+            # Get property ID for organizing images
+            property_id = properties._id if hasattr(properties, "_id") else None
+
+            # Combine GCS URLs from cache and newly uploaded images
+            gcs_image_urls = []
+
+            # First add URLs from cache (images that already existed in GCS)
+            existing_image_count = 0
+            for url in original_image_urls:
+                if url in self.image_url_to_gcs_url:
+                    gcs_image_urls.append(self.image_url_to_gcs_url[url])
+                    existing_image_count += 1
+
+            # Then process and upload new images
+            new_gcs_urls = []
+            if image_paths:
+                new_gcs_urls = self._process_successful_downloads(
+                    image_paths, property_id
+                )
+                gcs_image_urls.extend(new_gcs_urls)
+
+            # Update item with all GCS image URLs
+            if hasattr(properties, "image_urls"):
+                properties.image_urls = gcs_image_urls
+
+                # Log results based on what actually happened
+                self._log_image_processing_results(
+                    len(original_image_urls),
+                    existing_image_count,
+                    new_gcs_urls,
+                    failed_downloads,
+                )
 
             return item
-
         except Exception as e:
-            self.logger.error(f"Error in item_completed: {e}")
-            raise DropItem(f"Failed to process images: {e}")
+            self.logger.error(f"Error processing images: {e}")
+            # Continue processing even if image handling fails
+            return item
