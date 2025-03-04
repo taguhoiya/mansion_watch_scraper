@@ -130,14 +130,17 @@ class TestExtractUrls:
         The function should correctly identify and extract a single URL.
         """
         # Given: A message with a single URL
-        message = "Check out this property: https://suumo.jp/chintai/jnc_000056437301/"
+        message = "Check out this property: https://suumo.jp/ms/chuko/kanagawa/sc_kawasakishinakahara/nc_76856419/"
 
         # When: We extract URLs from the message
         urls = extract_urls(message)
 
         # Then: The function should return a list with the single URL
         assert len(urls) == 1
-        assert urls[0] == "https://suumo.jp/chintai/jnc_000056437301/"
+        assert (
+            urls[0]
+            == "https://suumo.jp/ms/chuko/kanagawa/sc_kawasakishinakahara/nc_76856419/"
+        )
 
     def test_extract_urls_multiple_urls(self) -> None:
         """
@@ -147,8 +150,8 @@ class TestExtractUrls:
         """
         # Given: A message with multiple URLs
         message = (
-            "Check these properties: https://suumo.jp/chintai/jnc_000056437301/ "
-            "and https://suumo.jp/chintai/jnc_000056437302/"
+            "Check these properties: https://suumo.jp/ms/chuko/kanagawa/sc_kawasakishinakahara/nc_76856419/ "
+            "and https://suumo.jp/ms/chuko/kanagawa/sc_kawasakishinakahara/nc_76856420/"
         )
 
         # When: We extract URLs from the message
@@ -156,8 +159,14 @@ class TestExtractUrls:
 
         # Then: The function should return a list with both URLs
         assert len(urls) == 2
-        assert urls[0] == "https://suumo.jp/chintai/jnc_000056437301/"
-        assert urls[1] == "https://suumo.jp/chintai/jnc_000056437302/"
+        assert (
+            urls[0]
+            == "https://suumo.jp/ms/chuko/kanagawa/sc_kawasakishinakahara/nc_76856419/"
+        )
+        assert (
+            urls[1]
+            == "https://suumo.jp/ms/chuko/kanagawa/sc_kawasakishinakahara/nc_76856420/"
+        )
 
     def test_extract_urls_no_urls(self) -> None:
         """
@@ -182,7 +191,7 @@ class TestExtractUrls:
         """
         # Given: A message with a URL that includes query parameters
         message = (
-            "Check this property: https://suumo.jp/chintai/jnc_000056437301/"
+            "Check this property: https://suumo.jp/ms/chuko/kanagawa/sc_kawasakishinakahara/nc_76856419/"
             "?key1=value1&key2=value2"
         )
 
@@ -193,7 +202,7 @@ class TestExtractUrls:
         assert len(urls) == 1
         assert (
             urls[0]
-            == "https://suumo.jp/chintai/jnc_000056437301/?key1=value1&key2=value2"
+            == "https://suumo.jp/ms/chuko/kanagawa/sc_kawasakishinakahara/nc_76856419/?key1=value1&key2=value2"
         )
 
     def test_extract_urls_with_property_name_and_url(self) -> None:
@@ -218,7 +227,7 @@ class TestExtractUrls:
 
 class TestIsValidPropertyUrl:
     def test_valid_suumo_url(self):
-        url = "https://suumo.jp/chintai/jnc_000056437301/"
+        url = "https://suumo.jp/ms/chuko/kanagawa/sc_kawasakishinakahara/nc_76856419/"
         assert is_valid_property_url(url) is True
 
     def test_invalid_domain_url(self):
@@ -226,7 +235,9 @@ class TestIsValidPropertyUrl:
         assert is_valid_property_url(url) is False
 
     def test_subdomain_suumo_url(self):
-        url = "https://sub.suumo.jp/chintai/jnc_000056437301/"
+        url = (
+            "https://sub.suumo.jp/ms/chuko/kanagawa/sc_kawasakishinakahara/nc_76856419/"
+        )
         assert is_valid_property_url(url) is True
 
     def test_valid_suumo_ms_chuko_url(self):
@@ -308,9 +319,7 @@ class TestProcessTextMessage:
         """
         event = MagicMock(spec=MessageEvent)
         event.message = MagicMock()
-        event.message.text = (
-            "Check this property: https://suumo.jp/chintai/jnc_000056437301/"
-        )
+        event.message.text = "Check this property: https://suumo.jp/ms/chuko/tokyo/sc_meguro/nc_75709932/"
         event.source = MagicMock(spec=Source)
         event.source.user_id = "test_user_id"
         event.reply_token = "test_reply_token"
@@ -367,7 +376,7 @@ class TestProcessTextMessage:
 
         # And: The start_scrapy function should be called with the correct parameters
         mock_start_scrapy.assert_called_once_with(
-            url="https://suumo.jp/chintai/jnc_000056437301/",
+            url="https://suumo.jp/ms/chuko/tokyo/sc_meguro/nc_75709932/",
             line_user_id="test_user_id",
         )
 
@@ -472,7 +481,7 @@ class TestProcessTextMessage:
 
         # And: The start_scrapy function should be called with the correct parameters
         mock_start_scrapy.assert_called_once_with(
-            url="https://suumo.jp/chintai/jnc_000056437301/",
+            url="https://suumo.jp/ms/chuko/tokyo/sc_meguro/nc_75709932/",
             line_user_id="test_user_id",
         )
 
