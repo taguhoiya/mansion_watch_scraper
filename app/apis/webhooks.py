@@ -11,6 +11,7 @@ from linebot.v3.messaging import (
     ApiClient,
     Configuration,
     MessagingApi,
+    PushMessageRequest,
     ReplyMessageRequest,
 )
 from linebot.v3.messaging import TextMessage as TextMessageSend
@@ -128,22 +129,8 @@ async def process_text_message(event: MessageEvent) -> None:
             )
             return
 
-        # Call the scrape endpoint
-        try:
-            # Send reply first to provide immediate feedback
-            await send_reply(
-                reply_token,
-                "物件のスクレイピングを開始しています。少々お待ちください。",
-            )
-            # Then start the scraping process
-            await start_scrapy(url=url, line_user_id=line_user_id)
-            await send_reply(reply_token, "スクレイピングが完了しました！")
-        except HTTPException as e:
-            logger.error(f"Error calling scrape endpoint: {str(e)}")
-            await send_reply(
-                reply_token,
-                "申し訳ありません。リクエストの処理中にエラーが発生しました。",
-            )
+        # Send initial reply and start scraping process
+        await handle_scraping(reply_token, url, line_user_id)
 
     except Exception as e:
         logger.error(f"Error processing text message: {str(e)}")
@@ -156,6 +143,102 @@ async def process_text_message(event: MessageEvent) -> None:
                 )
         except Exception:
             pass
+
+
+async def handle_scraping(reply_token: str, url: str, line_user_id: str) -> None:
+    """
+    Handle the scraping process and send appropriate messages to the user.
+
+    Args:
+        reply_token: The LINE reply token
+        url: The URL to scrape
+        line_user_id: The LINE user ID
+    """
+    try:
+        # Send reply first to provide immediate feedback - only use the reply token once
+        await send_reply(
+            reply_token,
+            "物件のスクレイピングを開始しています。少々お待ちください。",
+        )
+
+        # Start the scraping process
+        scrape_result = await start_scrapy(url=url, line_user_id=line_user_id)
+
+        # Check if the scraping was successful
+        if not scrape_result.get("success", False):
+            # Handle error based on the error message
+            await handle_scraping_error(line_user_id, scrape_result.get("error", ""))
+        else:
+            # Use push message instead of reply for the completion notification
+            await send_push_message(line_user_id, "スクレイピングが完了しました！")
+    except HTTPException as e:
+        logger.error(f"Error calling scrape endpoint: {str(e)}")
+        # Don't try to use the reply token again if there's an error
+        await send_push_message(
+            line_user_id,
+            "申し訳ありません。リクエストの処理中にエラーが発生しました。",
+        )
+
+
+async def handle_scraping_error(line_user_id: str, error_message: str) -> None:
+    """
+    Handle scraping errors and send appropriate error messages to the user.
+
+    Args:
+        line_user_id: The LINE user ID
+        error_message: The error message from the scraper
+    """
+    if (
+        "HTTP Status Code: 404" in error_message
+        or "Property not found (404)" in error_message
+    ):
+        await send_push_message(
+            line_user_id,
+            "申し訳ありません。指定された物件は見つかりませんでした。URLが正しいか、または物件が削除されていないか確認してください。",
+        )
+    elif "HTTP Status Code: 403" in error_message:
+        await send_push_message(
+            line_user_id,
+            "申し訳ありません。アクセスが拒否されました。しばらく時間をおいてから再度お試しください。",
+        )
+    elif "HTTP Status Code: 500" in error_message:
+        await send_push_message(
+            line_user_id,
+            "申し訳ありません。物件サイトでエラーが発生しています。しばらく時間をおいてから再度お試しください。",
+        )
+    elif "HttpError on" in error_message:
+        await send_push_message(
+            line_user_id,
+            "申し訳ありません。指定されたURLにアクセスできませんでした。URLが正しいか確認してください。",
+        )
+    elif "Property name not found" in error_message:
+        await send_push_message(
+            line_user_id,
+            "申し訳ありません。スクレイピング中にエラーが発生しました。後でもう一度お試しください。",
+        )
+    elif (
+        "ValidationError" in error_message
+        or "pydantic_core._pydantic_core.ValidationError" in error_message
+    ):
+        await send_push_message(
+            line_user_id,
+            "申し訳ありません。スクレイピング中にエラーが発生しました。後でもう一度お試しください。",
+        )
+    elif "DNSLookupError" in error_message:
+        await send_push_message(
+            line_user_id,
+            "申し訳ありません。ドメイン名を解決できませんでした。インターネット接続を確認してください。",
+        )
+    elif "TimeoutError" in error_message:
+        await send_push_message(
+            line_user_id,
+            "申し訳ありません。リクエストがタイムアウトしました。サーバーが混雑している可能性があります。後でもう一度お試しください。",
+        )
+    else:
+        await send_push_message(
+            line_user_id,
+            "スクレイピング中にエラーが発生しました。後でもう一度お試しください。",
+        )
 
 
 def extract_urls(text: str) -> list[str]:
@@ -187,6 +270,7 @@ def is_valid_property_url(url: str) -> bool:
     # Parse the URL to get the domain
     parsed_url = urlparse(url)
     domain = parsed_url.netloc.lower()
+    path = parsed_url.path.lower()
 
     # List of known property listing domains
     property_domains = [
@@ -197,7 +281,27 @@ def is_valid_property_url(url: str) -> bool:
     ]
 
     # Check if the domain is in our list of property listing sites
-    return any(prop_domain in domain for prop_domain in property_domains)
+    if not any(prop_domain in domain for prop_domain in property_domains):
+        return False
+
+    # TODO: For now, we only support SUUMO ms
+    # For SUUMO, check if it's a valid property listing path
+    if "suumo.jp" in domain:
+        # Valid SUUMO property paths typically include:
+        # - /ms/ (mansion/apartment)
+        # - /chintai/ (rental)
+        # - /chuko/ (used)
+        # - /kodate/ (house)
+        valid_path_patterns = [
+            "/ms/",  # Mansion/apartment
+            # "/chintai/",  # Rental
+            # "/chuko/",  # Used
+            # "/kodate/",  # House
+        ]
+        return any(pattern in path for pattern in valid_path_patterns)
+
+    # For other domains, we'll add specific validation later
+    return True
 
 
 async def send_reply(reply_token: str, message: str) -> None:
@@ -219,6 +323,29 @@ async def send_reply(reply_token: str, message: str) -> None:
             )
     except Exception as e:
         logger.error(f"Error sending reply: {str(e)}")
+
+
+async def send_push_message(user_id: str, message: str) -> None:
+    """
+    Send a push message to the user.
+
+    This is used when we can't use a reply token (e.g., it's already been used or expired).
+
+    Args:
+        user_id: The LINE user ID to send the message to
+        message: The message to send
+    """
+    try:
+        with ApiClient(configuration) as api_client:
+            line_bot_api = MessagingApi(api_client)
+            line_bot_api.push_message_with_http_info(
+                PushMessageRequest(
+                    to=user_id,
+                    messages=[TextMessageSend(text=message, type="text")],
+                )
+            )
+    except Exception as e:
+        logger.error(f"Error sending push message: {str(e)}")
 
 
 @handler.add(FollowEvent)
@@ -273,6 +400,13 @@ async def process_follow_event(event: FollowEvent) -> None:
         # Insert the new user
         await users_collection.insert_one(new_user)
         logger.info(f"New user created: {line_user_id}")
+
+        # Send welcome message to new user
+        welcome_message = (
+            "ようこそ！マンションウォッチへ！\n"
+            "SUUMOの物件URLを送っていただければ、情報を取得します。"
+        )
+        await send_push_message(line_user_id, welcome_message)
 
     except Exception as e:
         logger.error(f"Error processing follow event: {str(e)}")

@@ -93,18 +93,34 @@ async def start_scrapy(url: str, line_user_id: str) -> Dict[str, Any]:
 
         result = await execute_scrapy_command(command)
 
-        if result["returncode"] != 0:
-            logger.error(f"Scrapy process failed: {result['stderr']}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Scrapy error: {result['stderr']}",
-            )
+        # Check for error messages in stderr
+        stderr = result["stderr"]
+
+        # Check for HTTP errors or other error messages in the output
+        # We need to be careful to exclude log messages that just have ERROR as the log level
+        if (
+            "ERROR: HttpError on" in stderr
+            or "HTTP Status Code: 404" in stderr
+            or "HTTP Status Code: 403" in stderr
+            or "HTTP Status Code: 500" in stderr
+            or "ERROR: Property name not found" in stderr
+            or "ValidationError" in stderr
+            or "pydantic_core._pydantic_core.ValidationError" in stderr
+        ):
+            logger.error(f"Scrapy process encountered errors: {stderr}")
+            return {
+                "message": "Scrapy process completed with errors",
+                "output": result["stdout"],
+                "error": stderr,
+                "success": False,
+            }
 
         logger.info(f"Scrapy process completed successfully for URL: {url}")
         return {
             "message": "Scrapy crawl and db insert completed successfully",
             "output": result["stdout"],
-            "error": result["stderr"],
+            "error": stderr,
+            "success": True,
         }
 
     except asyncio.SubprocessError as e:
