@@ -152,6 +152,45 @@ class TestStartScrapy:
         assert "message" in result
         assert result["message"] == "Scrapy crawl and db insert completed successfully"
 
+    async def test_start_scrapy_404_error(
+        self, mock_execute_scrapy_command, mock_build_scrapy_command
+    ):
+        # Configure the mock to simulate a 404 error
+        mock_execute_scrapy_command.return_value = {
+            "returncode": 0,  # Note: 404 errors don't cause a non-zero return code in our implementation
+            "stdout": "",
+            "stderr": "2025-03-05 10:55:03 [mansion_watch_scraper] INFO: HTTP Status Code: 404\n2025-03-05 10:55:03 [mansion_watch_scraper] INFO: Property not found (404). The URL may be incorrect or the property listing may have been removed.",
+        }
+
+        url = "https://suumo.jp/ms/chuko/tokyo/sc_shinjuku/nc_98246732/"
+        line_user_id = "test_user_id"
+
+        result = await start_scrapy(url=url, line_user_id=line_user_id)
+
+        # Check that build_scrapy_command was called with the correct parameters
+        mock_build_scrapy_command.assert_called_once_with(url, line_user_id)
+
+        # Check that execute_scrapy_command was called with the result of build_scrapy_command
+        mock_execute_scrapy_command.assert_called_once_with(
+            [
+                "scrapy",
+                "runspider",
+                "mansion_watch_scraper/spiders/suumo_scraper.py",
+                "-a",
+                "url=test_url",
+                "-a",
+                "line_user_id=test_user",
+            ]
+        )
+
+        # Check the result
+        assert "message" in result
+        assert result["message"] == "Property not found"
+        assert result["status"] == "not_found"
+        assert result["url"] == url
+        assert "error" in result
+        assert "404 status code" in result["error"]
+
     async def test_start_scrapy_error(
         self, mock_execute_scrapy_command, mock_build_scrapy_command
     ):
