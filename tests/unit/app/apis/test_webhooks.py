@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException, Request, status
 from linebot.v3.exceptions import InvalidSignatureError
-from linebot.v3.webhooks import FollowEvent, MessageEvent, Source
+from linebot.v3.webhooks import FollowEvent, MessageEvent, Source, TextMessageContent
 
 from app.apis.webhooks import (
     extract_urls,
@@ -318,7 +318,7 @@ class TestProcessTextMessage:
             MagicMock: A mock of the MessageEvent
         """
         event = MagicMock(spec=MessageEvent)
-        event.message = MagicMock()
+        event.message = MagicMock(spec=TextMessageContent)
         event.message.text = "Check this property: https://suumo.jp/ms/chuko/tokyo/sc_meguro/nc_75709932/"
         event.source = MagicMock(spec=Source)
         event.source.user_id = "test_user_id"
@@ -368,17 +368,24 @@ class TestProcessTextMessage:
             mock_send_reply: Mock of the send_reply function
             mock_start_scrapy: Mock of the start_scrapy function
         """
-        # When: We process a message with a valid URL
-        await process_text_message(mock_event)
+        # Given: We need to mock extract_suumo_url and handle_scraping
+        with patch(
+            "app.apis.webhooks.extract_suumo_url",
+            return_value="https://suumo.jp/ms/chuko/tokyo/sc_meguro/nc_75709932/",
+        ), patch("app.apis.webhooks.handle_scraping") as mock_handle_scraping:
+            # Configure the mock
+            mock_handle_scraping.return_value = asyncio.Future()
+            mock_handle_scraping.return_value.set_result(None)
 
-        # Then: The send_reply function should be called twice (initial confirmation and completion)
-        assert mock_send_reply.call_count == 2
+            # When: We process a message with a valid URL
+            await process_text_message(mock_event)
 
-        # And: The start_scrapy function should be called with the correct parameters
-        mock_start_scrapy.assert_called_once_with(
-            url="https://suumo.jp/ms/chuko/tokyo/sc_meguro/nc_75709932/",
-            line_user_id="test_user_id",
-        )
+            # Then: The handle_scraping function should be called with the correct parameters
+            mock_handle_scraping.assert_called_once()
+            call_args = mock_handle_scraping.call_args[0]
+            assert call_args[0] == "test_reply_token"
+            assert "suumo.jp" in call_args[1]
+            assert call_args[2] == "test_user_id"
 
     @pytest.mark.asyncio
     async def test_process_text_message_no_url(
@@ -390,7 +397,7 @@ class TestProcessTextMessage:
         """
         Test processing a message with no URL.
 
-        The function should detect that there's no URL and send an appropriate message.
+        The function should detect that there's no URL and not call any functions.
 
         Args:
             mock_event: Mock MessageEvent
@@ -400,15 +407,13 @@ class TestProcessTextMessage:
         # Given: A message with no URL
         mock_event.message.text = "This message has no URL"
 
-        # When: We process the message
-        await process_text_message(mock_event)
+        # And: We need to mock handle_scraping
+        with patch("app.apis.webhooks.handle_scraping") as mock_handle_scraping:
+            # When: We process the message
+            await process_text_message(mock_event)
 
-        # Then: The send_reply function should be called once with the no URL message
-        mock_send_reply.assert_called_once()
-        assert "URLが見つかりませんでした" in mock_send_reply.call_args[0][1]
-
-        # And: The start_scrapy function should not be called
-        mock_start_scrapy.assert_not_called()
+            # Then: The handle_scraping function should not be called
+            mock_handle_scraping.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_process_text_message_invalid_url(
@@ -420,7 +425,7 @@ class TestProcessTextMessage:
         """
         Test processing a message with an invalid URL.
 
-        The function should detect that the URL is invalid and send an appropriate message.
+        The function should detect that the URL is invalid and not call any functions.
 
         Args:
             mock_event: Mock MessageEvent
@@ -430,15 +435,13 @@ class TestProcessTextMessage:
         # Given: A message with an invalid URL
         mock_event.message.text = "Check this: https://example.com/not-a-property"
 
-        # When: We process the message
-        await process_text_message(mock_event)
+        # And: We need to mock handle_scraping
+        with patch("app.apis.webhooks.handle_scraping") as mock_handle_scraping:
+            # When: We process the message
+            await process_text_message(mock_event)
 
-        # Then: The send_reply function should be called once with the invalid URL message
-        mock_send_reply.assert_called_once()
-        assert "有効な物件URLではありません" in mock_send_reply.call_args[0][1]
-
-        # And: The start_scrapy function should not be called
-        mock_start_scrapy.assert_not_called()
+            # Then: The handle_scraping function should not be called
+            mock_handle_scraping.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_process_text_message_scrape_exception(
@@ -457,33 +460,38 @@ class TestProcessTextMessage:
             mock_send_reply: Mock of the send_reply function
             mock_start_scrapy: Mock of the start_scrapy function
         """
-        # Given: The start_scrapy function raises an exception
-        mock_start_scrapy.side_effect = HTTPException(
-            status_code=500, detail="Scrapy error"
-        )
+        # Given: We need to mock extract_suumo_url and handle_scraping
+        with patch(
+            "app.apis.webhooks.extract_suumo_url",
+            return_value="https://suumo.jp/ms/chuko/tokyo/sc_meguro/nc_75709932/",
+        ), patch("app.apis.webhooks.handle_scraping") as mock_handle_scraping:
+            # Configure the mock
+            mock_handle_scraping.side_effect = Exception("Test exception")
 
-        # When: We process the message
-        await process_text_message(mock_event)
+            # And: We need to mock send_reply to raise an exception
+            with patch("app.apis.webhooks.send_reply") as mock_send_reply_local:
+                mock_send_reply_local.side_effect = Exception("Reply failed")
 
-        # Then: The send_reply function should be called twice
-        assert mock_send_reply.call_count == 2
+                # And: We need to mock send_push_message
+                with patch("app.apis.webhooks.send_push_message") as mock_send_push:
+                    mock_send_push.return_value = asyncio.Future()
+                    mock_send_push.return_value.set_result(None)
 
-        # And: The first call should be the "starting scraping" message
-        assert mock_send_reply.call_args_list[0][0][0] == "test_reply_token"
-        assert (
-            "物件のスクレイピングを開始しています"
-            in mock_send_reply.call_args_list[0][0][1]
-        )
+                    # When: We process the message
+                    await process_text_message(mock_event)
 
-        # And: The second call should be the error message
-        assert mock_send_reply.call_args_list[1][0][0] == "test_reply_token"
-        assert "申し訳ありません" in mock_send_reply.call_args_list[1][0][1]
+                    # Then: The handle_scraping function should be called with the correct parameters
+                    mock_handle_scraping.assert_called_once()
+                    call_args = mock_handle_scraping.call_args[0]
+                    assert call_args[0] == "test_reply_token"
+                    assert "suumo.jp" in call_args[1]
+                    assert call_args[2] == "test_user_id"
 
-        # And: The start_scrapy function should be called with the correct parameters
-        mock_start_scrapy.assert_called_once_with(
-            url="https://suumo.jp/ms/chuko/tokyo/sc_meguro/nc_75709932/",
-            line_user_id="test_user_id",
-        )
+                    # And: The send_push_message function should be called with the error message
+                    mock_send_push.assert_called_once_with(
+                        "test_user_id",
+                        "申し訳ありません。メッセージの処理中にエラーが発生しました。",
+                    )
 
     @pytest.mark.asyncio
     async def test_process_text_message_with_property_name_and_url(
@@ -502,23 +510,26 @@ class TestProcessTextMessage:
         """
         # Given: A message event with a property name and URL
         event = MagicMock(spec=MessageEvent)
-        event.message = MagicMock()
+        event.message = MagicMock(spec=TextMessageContent)
         event.message.text = "コスギサードアヴェニューザ・レジデンス\nhttps://suumo.jp/ms/chuko/kanagawa/sc_kawasakishinakahara/nc_76856419/\nby SUUMO"
         event.source = MagicMock(spec=Source)
         event.source.user_id = "test_user_id"
         event.reply_token = "test_reply_token"
 
-        # When: We process the message
-        await process_text_message(event)
+        # And: We need to mock handle_scraping
+        with patch("app.apis.webhooks.handle_scraping") as mock_handle_scraping:
+            mock_handle_scraping.return_value = asyncio.Future()
+            mock_handle_scraping.return_value.set_result(None)
 
-        # Then: The send_reply function should be called twice
-        assert mock_send_reply.call_count == 2
+            # When: We process the message
+            await process_text_message(event)
 
-        # And: The start_scrapy function should be called with the correct URL
-        mock_start_scrapy.assert_called_once_with(
-            url="https://suumo.jp/ms/chuko/kanagawa/sc_kawasakishinakahara/nc_76856419/",
-            line_user_id="test_user_id",
-        )
+            # Then: The handle_scraping function should be called with the correct parameters
+            mock_handle_scraping.assert_called_once_with(
+                "test_reply_token",
+                "https://suumo.jp/ms/chuko/kanagawa/sc_kawasakishinakahara/nc_76856419/",
+                "test_user_id",
+            )
 
 
 class TestHandleTextMessage:
@@ -579,7 +590,7 @@ class TestProcessFollowEvent:
             MagicMock: A mock of the FollowEvent
         """
         event = MagicMock(spec=FollowEvent)
-        event.source = MagicMock()
+        event.source = MagicMock(spec=Source)
         event.source.user_id = "test_user_id"
         return event
 
@@ -682,6 +693,8 @@ class TestHandleFollowEvent:
             MagicMock: A mock of the FollowEvent
         """
         event = MagicMock(spec=FollowEvent)
+        event.source = MagicMock(spec=Source)
+        event.source.user_id = "test_user_id"
         return event
 
     @pytest.fixture

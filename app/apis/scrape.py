@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import subprocess
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException, status
@@ -96,11 +97,20 @@ async def start_scrapy(url: str, line_user_id: str) -> Dict[str, Any]:
         # Check for error messages in stderr
         stderr = result["stderr"]
 
-        # Check for HTTP errors or other error messages in the output
+        # Check for 404 errors specifically - these are not server errors but expected responses
+        if "HTTP Status Code: 404" in stderr or "Property not found (404)" in stderr:
+            logger.info(f"Property not found (404) for URL: {url}")
+            return {
+                "message": "Property not found",
+                "status": "not_found",
+                "url": url,
+                "error": "The property URL returned a 404 status code. The property may have been removed or the URL is incorrect.",
+            }
+
+        # Check for other HTTP errors or error messages in the output
         # We need to be careful to exclude log messages that just have ERROR as the log level
         if (
             "ERROR: HttpError on" in stderr
-            or "HTTP Status Code: 404" in stderr
             or "HTTP Status Code: 403" in stderr
             or "HTTP Status Code: 500" in stderr
             or "ERROR: Property name not found" in stderr
@@ -123,7 +133,7 @@ async def start_scrapy(url: str, line_user_id: str) -> Dict[str, Any]:
             "success": True,
         }
 
-    except asyncio.SubprocessError as e:
+    except subprocess.SubprocessError as e:
         logger.exception(f"Subprocess error while running Scrapy: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

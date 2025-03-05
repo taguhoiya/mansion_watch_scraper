@@ -51,16 +51,76 @@ class TestHandleScrapingFunction:
         url = "https://suumo.jp/ms/mansion/tokyo/sc_shinjuku/"
         line_user_id = "test_user_id"
 
-        # Act
-        await handle_scraping(reply_token, url, line_user_id)
+        # We need to mock send_push_message
+        with patch(
+            "app.apis.webhooks.send_push_message", autospec=True
+        ) as mock_send_push:
+            mock_send_push.return_value = None
 
-        # Assert
-        assert mock_send_reply.call_count == 2
-        mock_send_reply.assert_any_call(
-            reply_token, "物件のスクレイピングを開始しています。少々お待ちください。"
-        )
-        mock_send_reply.assert_any_call(reply_token, "スクレイピングが完了しました！")
-        mock_start_scrapy.assert_called_once_with(url=url, line_user_id=line_user_id)
+            # Act
+            await handle_scraping(reply_token, url, line_user_id)
+
+            # Assert
+            # Only one send_reply call for the initial message
+            assert mock_send_reply.call_count == 1
+            mock_send_reply.assert_any_call(
+                reply_token,
+                "物件のスクレイピングを開始しています。少々お待ちください。",
+            )
+
+            # Completion message sent as push message
+            mock_send_push.assert_called_once_with(
+                line_user_id, "スクレイピングが完了しました！"
+            )
+
+            mock_start_scrapy.assert_called_once_with(
+                url=url, line_user_id=line_user_id
+            )
+
+    @pytest.mark.asyncio
+    async def test_handle_scraping_property_not_found(
+        self, mock_send_reply: AsyncMock, mock_start_scrapy: AsyncMock
+    ) -> None:
+        """Test handling a property not found (404) response from the scrape endpoint."""
+        # Arrange
+        reply_token = "test_reply_token"
+        url = "https://suumo.jp/ms/chuko/tokyo/sc_shinjuku/nc_98246732/"
+        line_user_id = "test_user_id"
+
+        # Mock the response from start_scrapy with a not_found status
+        mock_start_scrapy.return_value = {
+            "message": "Property not found",
+            "status": "not_found",
+            "url": url,
+            "error": "The property URL returned a 404 status code. The property may have been removed or the URL is incorrect.",
+        }
+
+        # We need to mock send_push_message
+        with patch(
+            "app.apis.webhooks.send_push_message", autospec=True
+        ) as mock_send_push:
+            mock_send_push.return_value = None
+
+            # Act
+            await handle_scraping(reply_token, url, line_user_id)
+
+            # Assert
+            # Only one send_reply call for the initial message
+            assert mock_send_reply.call_count == 1
+            mock_send_reply.assert_any_call(
+                reply_token,
+                "物件のスクレイピングを開始しています。少々お待ちください。",
+            )
+
+            # Property not found message sent as push message
+            mock_send_push.assert_called_once_with(
+                line_user_id,
+                "指定された物件は見つかりませんでした。URLが正しいか、または物件が削除されていないか確認してください。",
+            )
+
+            mock_start_scrapy.assert_called_once_with(
+                url=url, line_user_id=line_user_id
+            )
 
     @pytest.mark.asyncio
     async def test_handle_scraping_http_exception(
@@ -75,17 +135,28 @@ class TestHandleScrapingFunction:
             status_code=500, detail="Internal server error"
         )
 
-        # Act
-        await handle_scraping(reply_token, url, line_user_id)
+        # We need to mock send_push_message
+        with patch(
+            "app.apis.webhooks.send_push_message", autospec=True
+        ) as mock_send_push:
+            mock_send_push.return_value = None
 
-        # Assert
-        assert mock_send_reply.call_count == 2
-        mock_send_reply.assert_any_call(
-            reply_token, "物件のスクレイピングを開始しています。少々お待ちください。"
-        )
-        mock_send_reply.assert_any_call(
-            reply_token, "申し訳ありません。リクエストの処理中にエラーが発生しました。"
-        )
+            # Act
+            await handle_scraping(reply_token, url, line_user_id)
+
+            # Assert
+            # Only one send_reply call for the initial message
+            assert mock_send_reply.call_count == 1
+            mock_send_reply.assert_any_call(
+                reply_token,
+                "物件のスクレイピングを開始しています。少々お待ちください。",
+            )
+
+            # Error message sent as push message
+            mock_send_push.assert_called_once_with(
+                line_user_id,
+                "申し訳ありません。リクエストの処理中にエラーが発生しました。",
+            )
 
     @pytest.mark.asyncio
     async def test_handle_scraping_general_exception(
@@ -100,15 +171,29 @@ class TestHandleScrapingFunction:
         # Configure the mock to raise an exception on the second call
         mock_send_reply.side_effect = [None, Exception("Test exception")]
 
-        # Act
-        await handle_scraping(reply_token, url, line_user_id)
+        # We need to mock send_push_message
+        with patch(
+            "app.apis.webhooks.send_push_message", autospec=True
+        ) as mock_send_push:
+            mock_send_push.return_value = None
 
-        # Assert
-        # Just verify the first call was made correctly
-        mock_send_reply.assert_any_call(
-            reply_token, "物件のスクレイピングを開始しています。少々お待ちください。"
-        )
-        mock_start_scrapy.assert_called_once_with(url=url, line_user_id=line_user_id)
+            # Also mock the general exception in start_scrapy
+            mock_start_scrapy.side_effect = Exception("General error")
+
+            # Act
+            await handle_scraping(reply_token, url, line_user_id)
+
+            # Assert
+            mock_send_reply.assert_any_call(
+                reply_token,
+                "物件のスクレイピングを開始しています。少々お待ちください。",
+            )
+
+            # Error message sent as push message
+            mock_send_push.assert_called_once_with(
+                line_user_id,
+                "申し訳ありません。リクエストの処理中にエラーが発生しました。",
+            )
 
 
 @pytest.mark.webhook
@@ -532,7 +617,7 @@ class TestIntegrationScenarios:
         event = MagicMock(spec=MessageEvent)
         event.reply_token = "test_reply_token"
         event.message = MagicMock(spec=TextMessageContent)
-        event.message.text = "https://suumo.jp/ms/mansion/tokyo/sc_shinjuku/"
+        event.message.text = "Check out this property: https://suumo.jp/ms/test/"
         event.source = MagicMock(spec=Source)
         event.source.user_id = "test_user_id"
         return event
@@ -558,34 +643,38 @@ class TestIntegrationScenarios:
         mock_send_reply_integration: AsyncMock,
         mock_handle_scraping: AsyncMock,
     ) -> None:
-        """Test the full flow of processing a text message with a property URL."""
-        # Arrange
+        """
+        Test the full flow of processing a text message with a property URL.
+
+        This test simulates the entire process from receiving a message event
+        to handling the scraping process.
+        """
+        # Given: We need to mock the extract_urls and is_valid_property_url functions
         with patch(
-            "app.apis.webhooks.extract_urls",
-            return_value=["https://suumo.jp/ms/mansion/tokyo/sc_shinjuku/"],
+            "app.apis.webhooks.extract_urls", return_value=["https://suumo.jp/ms/test/"]
         ) as mock_extract_urls, patch(
             "app.apis.webhooks.is_valid_property_url", return_value=True
-        ) as mock_is_valid, patch(
-            "app.apis.webhooks.start_scrapy"
-        ) as mock_start_scrapy:
+        ) as mock_is_valid_property_url, patch(
+            "app.apis.webhooks.send_push_message", autospec=True
+        ) as mock_send_push:
+            mock_send_push.return_value = None
 
-            # Act
+            # When: We process the text message
             await process_text_message(mock_event_with_property_url)
 
-            # Assert
+            # Then: The URL extraction and validation functions should be called
             mock_extract_urls.assert_called_once_with(
-                mock_event_with_property_url.message.text
+                "Check out this property: https://suumo.jp/ms/test/"
             )
-            mock_is_valid.assert_called_once_with(
-                "https://suumo.jp/ms/mansion/tokyo/sc_shinjuku/"
+            mock_is_valid_property_url.assert_called_once_with(
+                "https://suumo.jp/ms/test/"
             )
-            mock_send_reply_integration.assert_called()
-            assert (
-                mock_send_reply_integration.call_count == 2
-            )  # Initial reply and completion reply
-            mock_start_scrapy.assert_called_once_with(
-                url="https://suumo.jp/ms/mansion/tokyo/sc_shinjuku/",
-                line_user_id=mock_event_with_property_url.source.user_id,
+
+            # And: The handle_scraping function should be called with the correct parameters
+            mock_handle_scraping.assert_called_once_with(
+                "test_reply_token",
+                "https://suumo.jp/ms/test/",
+                "test_user_id",
             )
 
     @pytest.fixture
@@ -620,8 +709,8 @@ class TestIntegrationScenarios:
         ) as mock_extract_urls, patch(
             "app.apis.webhooks.is_valid_property_url", return_value=True
         ) as mock_is_valid, patch(
-            "app.apis.webhooks.start_scrapy"
-        ) as mock_start_scrapy:
+            "app.apis.webhooks.handle_scraping", autospec=True
+        ) as mock_handle_scraping:
 
             # Act
             await process_text_message(mock_event_with_multiple_urls)
@@ -632,13 +721,12 @@ class TestIntegrationScenarios:
             )
             # Should only validate and process the first URL
             mock_is_valid.assert_called_once_with(urls[0])
-            mock_send_reply_integration.assert_called()
-            assert (
-                mock_send_reply_integration.call_count == 2
-            )  # Initial reply and completion reply
-            mock_start_scrapy.assert_called_once_with(
-                url=urls[0],  # Only the first URL should be processed
-                line_user_id=mock_event_with_multiple_urls.source.user_id,
+
+            # The handle_scraping function should be called with the first URL
+            mock_handle_scraping.assert_called_once_with(
+                mock_event_with_multiple_urls.reply_token,
+                urls[0],  # Only the first URL should be processed
+                mock_event_with_multiple_urls.source.user_id,
             )
 
 
