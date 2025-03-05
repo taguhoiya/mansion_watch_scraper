@@ -57,6 +57,9 @@ class MansionWatchSpider(scrapy.Spider):
                 callback=self.parse,
                 errback=self.errback_httpbin,
                 dont_filter=True,
+                meta={
+                    "original_url": url
+                },  # Store the original URL for redirect detection
             )
 
     def errback_httpbin(self, failure):
@@ -69,22 +72,27 @@ class MansionWatchSpider(scrapy.Spider):
 
         if failure.check(HttpError):
             response = failure.value.response
-            self.logger.error("HttpError on %s", response.url)
-            self.logger.error("HTTP Status Code: %s", response.status)
 
-            # For 404 errors, provide a more specific message
+            # For 404 errors, log as INFO instead of ERROR since it's an expected scenario
             if response.status == 404:
-                self.logger.error(
+                self.logger.info("HttpError on %s", response.url)
+                self.logger.info("HTTP Status Code: %s", response.status)
+                self.logger.info(
                     "Property not found (404). The URL may be incorrect or the property listing may have been removed."
                 )
-            elif response.status == 403:
-                self.logger.error(
-                    "Access forbidden (403). The site may be blocking scrapers."
-                )
-            elif response.status == 500:
-                self.logger.error(
-                    "Server error (500). The property site is experiencing issues."
-                )
+            else:
+                # For other HTTP errors, continue to log as ERROR
+                self.logger.error("HttpError on %s", response.url)
+                self.logger.error("HTTP Status Code: %s", response.status)
+
+                if response.status == 403:
+                    self.logger.error(
+                        "Access forbidden (403). The site may be blocking scrapers."
+                    )
+                elif response.status == 500:
+                    self.logger.error(
+                        "Server error (500). The property site is experiencing issues."
+                    )
 
         elif failure.check(DNSLookupError):
             request = failure.request
@@ -113,8 +121,57 @@ class MansionWatchSpider(scrapy.Spider):
         Returns:
             The property name if found, None otherwise
         """
+        # Try the standard property page format first
         property_name_xpath = f'normalize-space(//tr[th/div[contains(text(), "{ElementKeys.PROPERTY_NAME.value}")]]/td)'
-        return response.xpath(property_name_xpath).get()
+        property_name = response.xpath(property_name_xpath).get()
+
+        # If not found and it's a library page, try the library page format
+        if not property_name and "/library/" in response.url:
+            property_name = self._extract_property_name_from_library(response)
+
+        return property_name
+
+    def _extract_property_name_from_library(self, response: Response) -> Optional[str]:
+        """Extract the property name from a library page.
+
+        Args:
+            response: Scrapy response object
+        Returns:
+            The property name if found, None otherwise
+        """
+        # Try to extract from the h1 title
+        property_name_xpath = "normalize-space(//h1)"
+        property_name = response.xpath(property_name_xpath).get()
+
+        if property_name:
+            return property_name
+
+        # Try alternative xpath for library pages
+        property_name_xpath = 'normalize-space(//*[@id="mainContents"]/div/h1)'
+        property_name = response.xpath(property_name_xpath).get()
+
+        if property_name:
+            return property_name
+
+        # Try to extract from the page title
+        title_xpath = "normalize-space(//title)"
+        title = response.xpath(title_xpath).get()
+
+        if title:
+            # SUUMO titles often have the format "PropertyName | SUUMO"
+            parts = title.split("|")
+            if len(parts) > 1:
+                return parts[0].strip()
+
+            # Or they might have the format "PropertyName - SUUMO"
+            parts = title.split("-")
+            if len(parts) > 1:
+                return parts[0].strip()
+
+            # If no separators, just return the title
+            return title
+
+        return None
 
     def _extract_large_prop_desc(self, response: Response) -> Optional[str]:
         """Extract the property description from the response.
@@ -154,6 +211,19 @@ class MansionWatchSpider(scrapy.Spider):
         Returns:
             List of image URLs
         """
+        # Check if this is a library page (sold-out property)
+        original_url = response.meta.get("original_url", "")
+        is_redirected_to_library = self._is_redirected_to_library(
+            response, original_url
+        )
+
+        if is_redirected_to_library:
+            self.logger.info(
+                "Skipping image extraction for sold-out property (library page)"
+            )
+            # Return an empty list for sold-out properties
+            return []
+
         # Step 1: Define XPath patterns to find image URLs
         xpath_patterns = self._get_image_xpath_patterns()
 
@@ -164,7 +234,12 @@ class MansionWatchSpider(scrapy.Spider):
         image_urls = self._process_image_urls(response, all_urls)
 
         # Step 4: Log results
-        self._log_image_extraction_results(image_urls)
+        if image_urls:
+            self.logger.info(f"Total unique image URLs found: {len(image_urls)}")
+        else:
+            self.logger.warning(
+                "No image URLs found for active property - this may indicate an issue with the page structure"
+            )
 
         return image_urls
 
@@ -265,14 +340,6 @@ class MansionWatchSpider(scrapy.Spider):
             processed_urls.append(url)
 
         return processed_urls
-
-    def _log_image_extraction_results(self, image_urls: List[str]) -> None:
-        """Log the results of image extraction.
-
-        Args:
-            image_urls: List of extracted image URLs
-        """
-        self.logger.info(f"Total unique image URLs found: {len(image_urls)}")
 
     def _extract_property_overview(
         self,
@@ -411,23 +478,46 @@ class MansionWatchSpider(scrapy.Spider):
         self.logger.info("Successful response from %s", response.url)
         current_time = get_current_time()
 
+        # Check if the response URL is a redirect to a library page (sold-out property)
+        original_url = response.meta.get("original_url", "")
+        is_redirected_to_library = self._is_redirected_to_library(
+            response, original_url
+        )
+
         # Step 1: Extract property name and validate
         property_name = self._extract_property_name(response)
-        self._validate_property_name(property_name, response.url)
+
+        # For library pages, we don't need to log an error if property name is not found
+        if not is_redirected_to_library:
+            self._validate_property_name(property_name, response.url)
 
         # Step 2: Extract property data
         property_obj = self._create_property_object(
-            response, property_name, current_time
+            response, property_name, current_time, is_redirected_to_library
         )
 
         # Step 3: Create user property data
         user_property_dict = self._create_user_property_dict(current_time)
 
-        # Step 4: Extract overview data
-        property_overview = self._extract_property_overview(
-            response, property_name, current_time, None
-        )
-        common_overview = self._extract_common_overview(response, current_time, None)
+        # Step 4: Extract overview data or create default objects for library pages
+        if is_redirected_to_library:
+            # For library pages (sold-out properties), create default overview objects
+            # to avoid validation errors
+            self.logger.info(
+                "Creating default overview objects for library page (sold-out property)"
+            )
+            property_overview = self._create_default_property_overview(
+                current_time, None
+            )
+            common_overview = self._create_default_common_overview(current_time, None)
+        else:
+            # For normal property pages, extract overview data as usual
+            property_overview = self._extract_property_overview(
+                response, property_name, current_time, None
+            )
+            common_overview = self._extract_common_overview(
+                response, current_time, None
+            )
 
         # Step 5: Yield the complete item
         yield {
@@ -451,8 +541,107 @@ class MansionWatchSpider(scrapy.Spider):
                 "or has a different structure."
             )
 
+    def _is_redirected_to_library(self, response: Response, original_url: str) -> bool:
+        """Check if the response URL is a redirect to a library page (sold-out property).
+
+        Args:
+            response: Scrapy response object
+            original_url: The original URL requested
+
+        Returns:
+            True if redirected to a library page, False otherwise
+        """
+        # Check if the URL has changed and contains "/library/"
+        if (
+            original_url
+            and response.url != original_url
+            and "/library/" in response.url
+        ):
+            self.logger.info(
+                f"Detected redirect to library page (likely sold-out property). "
+                f"Original URL: {original_url}, Redirected URL: {response.url}"
+            )
+            return True
+        return False
+
+    def _create_default_property_overview(
+        self, current_time, property_id: Optional[ObjectId]
+    ) -> PropertyOverview:
+        """Create a default PropertyOverview object for library pages (sold-out properties).
+
+        Args:
+            current_time: Current timestamp
+            property_id: ID of the property or None
+
+        Returns:
+            Default PropertyOverview object
+        """
+        # Create a dictionary with default values for all required fields
+        overview_dict = {
+            "sales_schedule": "情報なし (売却済み)",
+            "event_information": "情報なし (売却済み)",
+            "number_of_units_for_sale": "情報なし (売却済み)",
+            "highest_price_range": "情報なし (売却済み)",
+            "price": "情報なし (売却済み)",
+            "maintenance_fee": "情報なし (売却済み)",
+            "repair_reserve_fund": "情報なし (売却済み)",
+            "first_repair_reserve_fund": "情報なし (売却済み)",
+            "other_expenses": "情報なし (売却済み)",
+            "floor_plan": "情報なし (売却済み)",
+            "area": "情報なし (売却済み)",
+            "other_area": "情報なし (売却済み)",
+            "delivery_time": "情報なし (売却済み)",
+            "completion_time": "情報なし (売却済み)",
+            "floor": "情報なし (売却済み)",
+            "direction": "情報なし (売却済み)",
+            "energy_consumption_performance": "情報なし (売却済み)",
+            "insulation_performance": "情報なし (売却済み)",
+            "estimated_utility_cost": "情報なし (売却済み)",
+            "renovation": "情報なし (売却済み)",
+            "other_restrictions": "情報なし (売却済み)",
+            "other_overview_and_special_notes": "情報なし (売却済み)",
+            "created_at": current_time,
+            "updated_at": current_time,
+            "property_id": property_id,
+        }
+
+        return PropertyOverview(**overview_dict)
+
+    def _create_default_common_overview(
+        self, current_time, property_id: Optional[ObjectId]
+    ) -> CommonOverview:
+        """Create a default CommonOverview object for library pages (sold-out properties).
+
+        Args:
+            current_time: Current timestamp
+            property_id: ID of the property or None
+
+        Returns:
+            Default CommonOverview object
+        """
+        # Create a dictionary with default values for all required fields
+        overview_dict = {
+            "location": "情報なし (売却済み)",
+            "transportation": ["情報なし (売却済み)"],
+            "total_units": "情報なし (売却済み)",
+            "structure_floors": "情報なし (売却済み)",
+            "site_area": "情報なし (売却済み)",
+            "site_ownership_type": "情報なし (売却済み)",
+            "usage_area": "情報なし (売却済み)",
+            "parking_lot": "情報なし (売却済み)",
+            "created_at": current_time,
+            "updated_at": current_time,
+            "property_id": property_id,
+        }
+
+        return CommonOverview(**overview_dict)
+
     def _create_property_object(
-        self, response: Response, property_name: Optional[str], current_time
+        self,
+        response: Response,
+        property_name: Optional[str],
+        current_time,
+        is_redirected_to_library: bool = False,
     ) -> Property:
         """Create a Property object from the extracted data.
 
@@ -460,19 +649,48 @@ class MansionWatchSpider(scrapy.Spider):
             response: Scrapy response object
             property_name: The extracted property name or None
             current_time: Current timestamp
+            is_redirected_to_library: Whether the request was redirected to a library page
 
         Returns:
             Property object
         """
+        # If redirected to library page, mark as inactive regardless of property name
+        is_active = not is_redirected_to_library and bool(property_name)
+
+        # For library pages, add a note about the property being sold out
+        if is_redirected_to_library:
+            # If we have a property name from the library page, use it
+            if property_name:
+                display_name = property_name
+            else:
+                # Try to extract property name from the URL or use a default
+                url_parts = response.url.split("/")
+                if len(url_parts) > 4:
+                    # Extract potential property name from URL
+                    display_name = url_parts[4].replace("_", " ").title()
+                else:
+                    display_name = "物件名不明"
+
+            # Add a note about the property being sold out
+            property_name = f"{display_name} (売却済み)"
+            large_desc = "この物件は現在販売されていません。"
+            small_desc = "この物件は売却済みです。最新の情報はSUUMOのライブラリページでご確認ください。"
+            # Empty image_urls for sold-out properties
+            image_urls = []
+        else:
+            large_desc = self._extract_large_prop_desc(response)
+            small_desc = self._extract_small_prop_desc(response)
+            image_urls = self._extract_image_urls(response)
+
         property_dict = {
             "name": property_name if property_name else "物件名不明",
             "url": response.url,
-            "large_property_description": self._extract_large_prop_desc(response),
-            "small_property_description": self._extract_small_prop_desc(response),
-            "is_active": bool(property_name),
+            "large_property_description": large_desc,
+            "small_property_description": small_desc,
+            "is_active": is_active,
             "created_at": current_time,
             "updated_at": current_time,
-            "image_urls": self._extract_image_urls(response),
+            "image_urls": image_urls,
         }
         return Property(**property_dict)
 

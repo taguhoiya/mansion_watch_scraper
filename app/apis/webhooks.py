@@ -94,75 +94,79 @@ def handle_text_message(event: MessageEvent) -> None:
     asyncio.create_task(process_text_message(event))
 
 
-async def process_text_message(event: MessageEvent) -> None:
+def extract_suumo_url(text: str) -> str:
     """
-    Process a text message asynchronously.
+    Extract a SUUMO property URL from text.
 
     Args:
-        event: The LINE message event containing text
+        text: The text to extract a SUUMO URL from
+
+    Returns:
+        The first valid SUUMO property URL found, or an empty string if none found
+    """
+    # Extract all URLs from the text
+    urls = extract_urls(text)
+
+    # Return the first valid SUUMO property URL
+    for url in urls:
+        if is_valid_property_url(url) and "suumo.jp" in url:
+            return url
+
+    # No valid SUUMO property URL found
+    return ""
+
+
+async def process_text_message(event: MessageEvent) -> None:
+    """
+    Process a text message from a LINE user.
+
+    Args:
+        event: The LINE message event
     """
     try:
+        if not hasattr(event, "message") or not isinstance(
+            event.message, TextMessageContent
+        ):
+            return
+
         message_text = event.message.text
         line_user_id = event.source.user_id
         reply_token = event.reply_token
-
         logger.info(f"Processing message from {line_user_id}: {message_text}")
 
-        # Extract URLs from the message
-        urls = extract_urls(message_text)
-
-        if not urls:
-            await send_reply(
-                reply_token,
-                "URLが見つかりませんでした。もう一度物件のURLを送ってください。",
-            )
+        # Check if the message contains a SUUMO URL
+        url = extract_suumo_url(message_text)
+        if not url:
+            logger.info(f"No valid SUUMO URL found in message: {message_text}")
             return
 
-        # Process the first URL found (we'll only handle one URL per message)
-        url = urls[0]
-
-        # Validate if it's a property listing URL (basic check)
-        if not is_valid_property_url(url):
-            await send_reply(
-                reply_token,
-                "送って頂いたメッセージは、有効な物件URLではありません。確認してからもう一度試してください。",
-            )
-            return
-
-        # Send initial reply
-        await send_reply(
-            reply_token,
-            "物件のスクレイピングを開始しています。少々お待ちください。",
-        )
-
-        try:
-            # Start the scraping process
-            await start_scrapy(url=url, line_user_id=line_user_id)
-
-            # Send completion reply (for tests)
-            await send_reply(
-                reply_token,
-                "スクレイピングが完了しました！",
-            )
-        except HTTPException as e:
-            logger.error(f"Error calling scrape endpoint: {str(e)}")
-            # Send error reply
-            await send_reply(
-                reply_token,
-                "申し訳ありません。リクエストの処理中にエラーが発生しました。",
-            )
+        # Handle the scraping process
+        await handle_scraping(reply_token, url, line_user_id)
 
     except Exception as e:
         logger.error(f"Error processing text message: {str(e)}")
         # Try to send an error message if possible
         try:
-            if event and hasattr(event, "reply_token"):
-                await send_reply(
-                    event.reply_token,
-                    "申し訳ありません。メッセージの処理中にエラーが発生しました。",
-                )
-        except Exception:
-            pass
+            if (
+                event
+                and hasattr(event, "reply_token")
+                and hasattr(event, "source")
+                and hasattr(event.source, "user_id")
+            ):
+                # First try to use the reply token
+                try:
+                    await send_reply(
+                        event.reply_token,
+                        "申し訳ありません。メッセージの処理中にエラーが発生しました。",
+                    )
+                except Exception:
+                    # If reply fails, fall back to push message
+                    await send_push_message(
+                        event.source.user_id,
+                        "申し訳ありません。メッセージの処理中にエラーが発生しました。",
+                    )
+        except Exception as inner_e:
+            logger.error(f"Failed to send error message: {str(inner_e)}")
 
 
 async def handle_scraping(reply_token: str, url: str, line_user_id: str) -> None:
@@ -183,25 +187,43 @@ async def handle_scraping(reply_token: str, url: str, line_user_id: str) -> None
 
         # Start the scraping process
         try:
-            await start_scrapy(url=url, line_user_id=line_user_id)
-            # For tests, use send_reply instead of send_push_message to ensure two replies are sent
-            await send_reply(
-                reply_token,
-                "スクレイピングが完了しました！",
-            )
+            result = await start_scrapy(url=url, line_user_id=line_user_id)
+
+            # Check if the result indicates a property not found (404)
+            if isinstance(result, dict) and result.get("status") == "not_found":
+                logger.info(f"Property not found for URL: {url}")
+                await send_push_message(
+                    line_user_id,
+                    "指定された物件は見つかりませんでした。URLが正しいか、または物件が削除されていないか確認してください。",
+                )
+            else:
+                # Use push message instead of reply since the reply token can only be used once
+                await send_push_message(
+                    line_user_id,
+                    "スクレイピングが完了しました！",
+                )
         except HTTPException as e:
             logger.error(f"Error calling scrape endpoint: {str(e)}")
-            await send_reply(
-                reply_token,
+            await send_push_message(
+                line_user_id,
+                "申し訳ありません。リクエストの処理中にエラーが発生しました。",
+            )
+        except Exception as e:
+            logger.error(f"General error in scraping process: {str(e)}")
+            await send_push_message(
+                line_user_id,
                 "申し訳ありません。リクエストの処理中にエラーが発生しました。",
             )
     except Exception as e:
         logger.error(f"Error in handle_scraping: {str(e)}")
-        # Don't try to use the reply token again if there's an error
-        await send_push_message(
-            line_user_id,
-            "申し訳ありません。リクエストの処理中にエラーが発生しました。",
-        )
+        # Try to send a push message even if the initial reply failed
+        try:
+            await send_push_message(
+                line_user_id,
+                "申し訳ありません。リクエストの処理中にエラーが発生しました。",
+            )
+        except Exception as inner_e:
+            logger.error(f"Failed to send error push message: {str(inner_e)}")
 
 
 async def handle_scraping_error(line_user_id: str, error_message: str) -> None:

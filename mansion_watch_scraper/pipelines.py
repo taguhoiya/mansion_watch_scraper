@@ -610,9 +610,19 @@ class SuumoImagesPipeline(ImagesPipeline):
             self.logger.warning("No properties found in item")
             return []
 
+        # Check if the property is inactive (sold-out)
+        is_active = properties.is_active if hasattr(properties, "is_active") else True
+
         image_urls = properties.image_urls if hasattr(properties, "image_urls") else []
         if not image_urls:
-            self.logger.warning("No image URLs found in item")
+            if not is_active:
+                # For sold-out properties, log a different message
+                self.logger.info(
+                    "Property is sold out (redirected to library page), no images expected"
+                )
+            else:
+                # For active properties with no images, log a warning
+                self.logger.warning("No image URLs found in item")
             return []
 
         return image_urls
