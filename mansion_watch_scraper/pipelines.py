@@ -421,6 +421,20 @@ def process_image(image_file: str) -> io.BytesIO:
         return buffer
 
 
+def get_gcs_url(bucket_name: str, blob_name: str) -> str:
+    """
+    Generate a publicly accessible URL for a GCS blob.
+
+    Args:
+        bucket_name: Name of the GCS bucket
+        blob_name: Name of the blob
+
+    Returns:
+        Public URL string
+    """
+    return f"https://storage.googleapis.com/{bucket_name}/{blob_name}"
+
+
 def upload_to_gcs(
     bucket: storage.bucket.Bucket, local_file: str, destination_blob_name: str
 ) -> bool:
@@ -441,8 +455,13 @@ def upload_to_gcs(
         # Process the image and get the buffer
         buffer = process_image(local_file)
 
-        # Upload the processed buffer
-        blob.upload_from_file(buffer, content_type="image/jpeg", rewind=True)
+        # Upload the processed buffer with public-read ACL
+        blob.upload_from_file(
+            buffer,
+            content_type="image/jpeg",
+            rewind=True,
+            predefined_acl="publicRead",  # Make the uploaded object publicly readable
+        )
 
         # Verify uploaded file
         blob.reload()
@@ -470,20 +489,6 @@ def check_blob_exists(bucket: storage.bucket.Bucket, blob_name: str) -> bool:
     except Exception as e:
         logger.error(f"Error checking if blob {blob_name} exists: {e}")
         return False
-
-
-def get_gcs_url(bucket_name: str, blob_name: str) -> str:
-    """
-    Generate a GCS URL for a blob.
-
-    Args:
-        bucket_name: Name of the GCS bucket
-        blob_name: Name of the blob
-
-    Returns:
-        GCS URL string
-    """
-    return f"gs://{bucket_name}/{blob_name}"
 
 
 class SuumoImagesPipeline(ImagesPipeline):
@@ -767,11 +772,45 @@ class SuumoImagesPipeline(ImagesPipeline):
             yield scrapy.Request(
                 url=image_url,
                 headers=headers,
-                meta={"dont_retry": True, "download_timeout": 30},
+                meta={
+                    "max_retry_times": 3,  # Allow up to 3 retries
+                    "download_timeout": 60,  # Increase timeout to 60 seconds
+                    "retry_times": 0,  # Initialize retry counter
+                },
                 dont_filter=True,  # Important: Bypass the OffsiteMiddleware filter
+                errback=self._handle_download_error,  # Add error handling callback
             )
         except Exception as e:
             self.logger.error(f"Error creating request for URL {image_url}: {e}")
+
+    def _handle_download_error(self, failure):
+        """
+        Handle download errors and implement retry logic.
+
+        Args:
+            failure: Twisted failure object containing error information
+
+        Returns:
+            New request if retries are available, None otherwise
+        """
+        request = failure.request
+        retry_times = request.meta.get("retry_times", 0)
+        max_retry_times = request.meta.get("max_retry_times", 3)
+
+        if retry_times < max_retry_times:
+            retry_times += 1
+            new_request = request.copy()
+            new_request.meta["retry_times"] = retry_times
+            new_request.dont_filter = True
+            self.logger.info(
+                f"Retrying {request.url} (attempt {retry_times + 1} of {max_retry_times + 1})"
+            )
+            return new_request
+        else:
+            self.logger.warning(
+                f"Failed to download {request.url} after {max_retry_times + 1} attempts"
+            )
+            return None
 
     def _get_filename_from_url(self, url):
         """
@@ -829,8 +868,8 @@ class SuumoImagesPipeline(ImagesPipeline):
             success = upload_to_gcs(self.bucket, local_file, destination_blob_name)
 
             if success:
-                # Construct GCS URL
-                gcs_url = f"gs://{self.gcp_bucket_name}/{destination_blob_name}"
+                # Construct GCS URL using the get_gcs_url function
+                gcs_url = get_gcs_url(self.gcp_bucket_name, destination_blob_name)
                 return gcs_url
             return None
         except Exception as e:
