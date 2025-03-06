@@ -38,3 +38,11 @@ test-cov: ## Run the tests with coverage report.
 .PHONY: test-docker
 test-docker: ## Run the tests in the docker container.
 	docker compose exec mansion_watch_scraper python -W ignore -m pytest tests/unit/ -v || true
+
+.PHONY: seed
+seed: ## Seed the database with sample data.
+	python seed.py
+
+.PHONY: seed-docker
+seed-docker: ## Seed the database with sample data in the docker container.
+	docker compose exec mansion_watch_scraper python seed.py
