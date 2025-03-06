@@ -430,7 +430,7 @@ def get_gcs_url(bucket_name: str, blob_name: str) -> str:
         blob_name: Name of the blob
 
     Returns:
-        Public URL string
+        Public HTTPS URL string for accessing the blob
     """
     return f"https://storage.googleapis.com/{bucket_name}/{blob_name}"
 
