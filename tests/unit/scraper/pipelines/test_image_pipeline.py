@@ -113,7 +113,7 @@ class TestImagePipeline(unittest.TestCase):
         result = get_gcs_url("test-bucket", "test-blob")
 
         # Assert that the result is correct
-        self.assertEqual(result, "gs://test-bucket/test-blob")
+        self.assertEqual(result, "https://storage.googleapis.com/test-bucket/test-blob")
 
     @patch("mansion_watch_scraper.pipelines.check_blob_exists")
     def test_process_image_urls_with_gcs_check_chunked_logging(
