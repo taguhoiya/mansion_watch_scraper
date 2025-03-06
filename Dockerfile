@@ -10,6 +10,14 @@ COPY . .
 
 ENV PYTHONUNBUFFERED=1
 
+# Make the seed script executable
+RUN chmod +x seed.py
+
+# Make the entrypoint script executable
+RUN chmod +x seed.sh
+
 EXPOSE 8080
+
+ENTRYPOINT ["./seed.sh"]
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]
