@@ -2,10 +2,15 @@
 import asyncio
 import logging
 import os
-from datetime import datetime
+import sys
+from datetime import datetime, timezone
 
 import motor.motor_asyncio
-from bson import ObjectId
+from pymongo.errors import (
+    ConnectionFailure,
+    OperationFailure,
+    ServerSelectionTimeoutError,
+)
 from pymongo.server_api import ServerApi
 
 # Configure logging
@@ -15,75 +20,107 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# MongoDB connection
+# Environment variables
+ENV = os.getenv("ENV", "development")
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-MONGO_DATABASE = os.getenv("MONGO_DATABASE", "mansion_watch")
-COLLECTION_USERS = os.getenv("COLLECTION_USERS", "users")
+DB_NAME = os.getenv("DB_NAME", "mansion_watch")
 COLLECTION_PROPERTIES = os.getenv("COLLECTION_PROPERTIES", "properties")
+COLLECTION_USERS = os.getenv("COLLECTION_USERS", "users")
 COLLECTION_USER_PROPERTIES = os.getenv("COLLECTION_USER_PROPERTIES", "user_properties")
 
 
-async def seed_database():
-    """Seed the database with sample data."""
-    logger.info(f"Connecting to MongoDB at {MONGO_URI}")
-    client = motor.motor_asyncio.AsyncIOMotorClient(
-        MONGO_URI, server_api=ServerApi("1")
+async def seed_database() -> None:
+    """Seed the database with initial data."""
+    # Check environment first
+    if os.getenv("ENV") == "production":
+        logger.error("Seeding is not allowed in production environment")
+        sys.exit(1)
+
+    logger.info(
+        f"Starting database seeding in {os.getenv('ENV', 'development')} environment"
     )
-    db = client[MONGO_DATABASE]
 
-    # Check if collections already have data
-    users_count = await db[COLLECTION_USERS].count_documents({})
-    properties_count = await db[COLLECTION_PROPERTIES].count_documents({})
-
-    if users_count > 0 or properties_count > 0:
-        logger.info("Database already has data. Skipping seeding.")
-        return
-
-    logger.info("Seeding database with sample data...")
-
-    # Sample user data
-    now = datetime.utcnow()
-    user_id = ObjectId()
-    user = {
-        "_id": user_id,
-        "line_user_id": "U23b619197d01bab29b2c54955db6c2a1",
-        "created_at": now,
-        "updated_at": now,
+    # MongoDB connection settings
+    client_settings = {
+        "server_api": ServerApi("1"),
+        "tls": False,  # Default TLS setting
     }
 
-    # Sample property data
-    property_id = ObjectId()
-    property_data = {
-        "_id": property_id,
-        "name": "クレヴィア渋谷富ヶ谷",
-        "url": "https://suumo.jp/ms/chuko/tokyo/sc_shibuya/nc_76483805/",
-        "is_active": True,
-        "large_property_description": "２沿線以上利用可、スーパー 徒歩10分以内、小学校 徒歩10分以内、駐輪場",
-        "small_property_description": "◎戸建感覚を演出するメゾネット<br>◎スキップフロアのある、立体的な空間構成の2LDK<br>◎各洋室2面採光<br>◎屋上は開放感のあるルーフテラス<br>◎西森事務所によるデザイナーズ設計",
-        "created_at": now,
-        "updated_at": now,
-        "image_urls": [
-            "https://storage.cloud.google.com/mansion_watch/property_images/sample1.jpg",
-            "https://storage.cloud.google.com/mansion_watch/property_images/sample2.jpg",
-        ],
-    }
+    # Add TLS settings only for Atlas connections
+    if "mongodb+srv" in MONGO_URI:
+        client_settings["tls"] = True
+        client_settings["tlsAllowInvalidCertificates"] = False
 
-    # Sample user_property data
-    user_property = {
-        "_id": ObjectId(),
-        "user_id": user_id,
-        "property_id": property_id,
-        "is_favorite": True,
-        "created_at": now,
-        "updated_at": now,
-    }
+    try:
+        client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI, **client_settings)
 
-    # Insert data
-    await db[COLLECTION_USERS].insert_one(user)
-    await db[COLLECTION_PROPERTIES].insert_one(property_data)
-    await db[COLLECTION_USER_PROPERTIES].insert_one(user_property)
+        db = client[DB_NAME]
 
-    logger.info("Database seeded successfully!")
+        # Check if collections already have data
+        collections = {
+            COLLECTION_PROPERTIES: db[COLLECTION_PROPERTIES],
+            COLLECTION_USERS: db[COLLECTION_USERS],
+            COLLECTION_USER_PROPERTIES: db[COLLECTION_USER_PROPERTIES],
+        }
+
+        for name, collection in collections.items():
+            if await collection.count_documents({}) > 0:
+                logger.info(f"Collection {name} already has data, skipping seeding")
+                return
+
+        logger.info("Seeding database...")
+
+        # Sample user data
+        now = datetime.now(timezone.utc)
+        user_data = {
+            "email": "admin@example.com",
+            "created_at": now,
+            "updated_at": now,
+        }
+
+        # Insert user data
+        user_result = await collections[COLLECTION_USERS].insert_one(user_data)
+        user_id = user_result.inserted_id
+
+        # Sample property data
+        property_data = {
+            "name": "Sample Property",
+            "description": "A sample property for testing",
+            "created_at": now,
+            "updated_at": now,
+        }
+
+        # Insert property data
+        property_result = await collections[COLLECTION_PROPERTIES].insert_one(
+            property_data
+        )
+        property_id = property_result.inserted_id
+
+        # Sample user property data
+        user_property_data = {
+            "user_id": user_id,
+            "property_id": property_id,
+            "created_at": now,
+            "updated_at": now,
+        }
+
+        # Insert user property data
+        await collections[COLLECTION_USER_PROPERTIES].insert_one(user_property_data)
+
+        logger.info("Database seeded successfully!")
+
+    except ConnectionFailure as e:
+        logger.error(f"Connection failure: {e}")
+        raise
+    except ServerSelectionTimeoutError as e:
+        logger.error(f"Server selection timeout: {e}")
+        raise
+    except OperationFailure as e:
+        logger.error(f"Operation failure: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Error seeding database: {e}")
+        raise
 
 
 async def main():
