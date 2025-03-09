@@ -32,13 +32,11 @@ COLLECTION_USER_PROPERTIES = os.getenv("COLLECTION_USER_PROPERTIES", "user_prope
 async def seed_database() -> None:
     """Seed the database with initial data."""
     # Check environment first
-    if os.getenv("ENV") == "production":
+    if ENV == "production":
         logger.error("Seeding is not allowed in production environment")
         sys.exit(1)
 
-    logger.info(
-        f"Starting database seeding in {os.getenv('ENV', 'development')} environment"
-    )
+    logger.info(f"Starting database seeding in {ENV} environment")
 
     # MongoDB connection settings
     client_settings = {
