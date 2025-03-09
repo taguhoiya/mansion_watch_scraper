@@ -13,6 +13,13 @@ class TestImagePipeline(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures."""
+        # Mock environment variables
+        self.env_patcher = patch.dict(
+            "os.environ",
+            {"GOOGLE_APPLICATION_CREDENTIALS": "/path/to/credentials.json"},
+        )
+        self.env_patcher.start()
+
         self.spider = MagicMock()
         self.spider.settings.get.side_effect = lambda key: {
             "MONGO_URI": "mongodb://localhost:27017",
@@ -26,12 +33,17 @@ class TestImagePipeline(unittest.TestCase):
         self.mock_storage_client = MagicMock()
         self.mock_bucket = MagicMock()
         self.mock_storage_client.bucket.return_value = self.mock_bucket
+        self.mock_bucket.exists.return_value = True  # Mock bucket existence check
 
         # Create a patch for the storage client
         self.storage_client_patcher = patch(
             "google.cloud.storage.Client", return_value=self.mock_storage_client
         )
         self.storage_client_mock = self.storage_client_patcher.start()
+
+        # Mock os.path.exists to return True for the credentials file
+        self.path_exists_patcher = patch("os.path.exists", return_value=True)
+        self.path_exists_patcher.start()
 
         # Create the pipeline
         self.pipeline = SuumoImagesPipeline("/tmp/images")
@@ -40,6 +52,8 @@ class TestImagePipeline(unittest.TestCase):
     def tearDown(self):
         """Tear down test fixtures."""
         self.storage_client_patcher.stop()
+        self.env_patcher.stop()
+        self.path_exists_patcher.stop()
 
     @patch("mansion_watch_scraper.pipelines.check_blob_exists")
     def test_process_single_image_url_existing_image(self, mock_check_blob_exists):
