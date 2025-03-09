@@ -26,8 +26,12 @@ COLLECTION_USER_PROPERTIES = os.getenv("COLLECTION_USER_PROPERTIES", "user_prope
 async def seed_database():
     """Seed the database with sample data."""
     logger.info(f"Connecting to MongoDB at {MONGO_URI}")
+
     client = motor.motor_asyncio.AsyncIOMotorClient(
-        MONGO_URI, server_api=ServerApi("1")
+        MONGO_URI,
+        server_api=ServerApi("1"),
+        tls=True if MONGO_URI.startswith("mongodb+srv://") else False,
+        tlsAllowInvalidCertificates=False,
     )
     db = client[MONGO_DATABASE]
 
