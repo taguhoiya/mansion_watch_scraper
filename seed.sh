@@ -1,8 +1,13 @@
 #!/bin/bash
 set -e
 
-echo "Waiting for MongoDB..."
-until python -c "
+# Check environment
+ENV=${ENV:-development}
+if [ "$ENV" = "production" ]; then
+    echo "Skipping database seed in production environment"
+else
+    echo "Waiting for MongoDB..."
+    until python -c "
 import sys
 import os
 import motor.motor_asyncio
@@ -22,12 +27,13 @@ except Exception as e:
     print(f'Error connecting to MongoDB: {e}')
     sys.exit(1)
 " 2>/dev/null; do
-  echo "MongoDB unavailable - sleeping 2s"
-  sleep 2
-done
+        echo "MongoDB unavailable - sleeping 2s"
+        sleep 2
+    done
 
-echo "MongoDB is up - executing seed script"
-python seed.py
+    echo "MongoDB is up - executing seed script"
+    python seed.py
+fi
 
 echo "Starting application..."
 exec "$@"
