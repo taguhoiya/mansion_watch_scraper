@@ -1,3 +1,4 @@
+import html
 from datetime import timedelta
 from typing import List, Optional
 
@@ -243,29 +244,11 @@ class MansionWatchSpider(scrapy.Spider):
 
         return image_urls
 
-    def _get_image_xpath_patterns(self) -> List[str]:
-        """Get a list of XPath patterns to extract image URLs.
-
-        Returns:
-            List of XPath patterns
-        """
+    def _get_image_xpath_patterns(self):
+        """Get XPath patterns for image URLs."""
         return [
-            # Lazy-loaded property images (most common on SUUMO)
-            '//img[@class="js-scrollLazy-image"]/@rel',
-            # Main property images
-            '//div[contains(@class, "mainphoto")]//img/@src',
-            '//div[contains(@class, "mainphoto")]//img/@data-src',
-            # Thumbnail property images
-            '//div[contains(@class, "thumbnail")]//img/@src',
-            '//div[contains(@class, "thumbnail")]//img/@data-src',
-            # Property image gallery
-            '//div[contains(@class, "photo")]//img/@src',
-            '//div[contains(@class, "photo")]//img/@data-src',
-            # Lightbox/gallery images
-            '//*[@id="js-lightbox"]//img/@src',
-            '//*[@id="js-lightbox"]/li/div/a/@data-src',
-            # Fallback for any remaining images (will be filtered by _process_image_urls)
-            "//img/@src",
+            # Get image URLs from lightbox gallery
+            "//*[@id='js-lightbox']//a[@class='carousel_item-object js-slideLazy js-lightboxItem']/@data-src",
         ]
 
     def _extract_urls_from_patterns(
@@ -299,47 +282,26 @@ class MansionWatchSpider(scrapy.Spider):
         Returns:
             List of processed image URLs
         """
-        processed_urls = []
-
-        # Regular expression to match property images
-        import re
-
-        # Match patterns like bukken/030/N010000/img/419/76856419/76856419_0019.jpg
-        property_image_pattern = re.compile(r"bukken.*\d+\.jpg", re.IGNORECASE)
-
+        processed_urls = set()
         for url in urls:
-            # Skip empty URLs
-            if not url or url.strip() == "":
+            # Split the value by comma to separate URL from description
+            parts = url.split(",")
+            if not parts:
                 continue
 
-            # Skip if not a property image
-            if not property_image_pattern.search(url):
-                continue
+            # Get the URL part and remove any HTML entities
+            image_url = parts[0].strip()
+            image_url = html.unescape(image_url)
 
-            # Handle relative URLs
-            if url.startswith("/"):
-                url = response.urljoin(url)
-            # Handle URLs with scheme
-            elif not (url.startswith("http://") or url.startswith("https://")):
-                # Try to fix URLs without scheme
-                if url.startswith("//"):
-                    url = "https:" + url
-                else:
-                    self.logger.warning(f"Skipping URL without proper scheme: {url}")
-                    continue
+            # Make URL absolute if it's relative
+            if image_url.startswith("/"):
+                image_url = f"https://img01.suumo.com{image_url}"
 
-            # Skip URLs that are not from suumo.jp or related domains
-            if not ("suumo" in url or "recruit" in url):
-                self.logger.warning(f"Skipping non-SUUMO URL: {url}")
-                continue
+            self.logger.debug(f"Found image URL: {image_url}")
+            processed_urls.add(image_url)
 
-            # Skip duplicate URLs
-            if url in processed_urls:
-                continue
-
-            processed_urls.append(url)
-
-        return processed_urls
+        self.logger.info(f"Total unique image URLs found: {len(processed_urls)}")
+        return list(processed_urls)
 
     def _extract_property_overview(
         self,

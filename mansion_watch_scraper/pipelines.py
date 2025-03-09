@@ -455,12 +455,11 @@ def upload_to_gcs(
         # Process the image and get the buffer
         buffer = process_image(local_file)
 
-        # Upload the processed buffer with public-read ACL
+        # Upload the processed buffer without setting ACL (use bucket-level access control)
         blob.upload_from_file(
             buffer,
             content_type="image/jpeg",
             rewind=True,
-            predefined_acl="publicRead",  # Make the uploaded object publicly readable
         )
 
         # Verify uploaded file
@@ -479,7 +478,6 @@ def check_blob_exists(bucket: storage.bucket.Bucket, blob_name: str) -> bool:
     Args:
         bucket: GCS bucket
         blob_name: Name of the blob to check
-
     Returns:
         True if blob exists, False otherwise
     """
@@ -513,11 +511,60 @@ class SuumoImagesPipeline(ImagesPipeline):
         # Get the local directory where images are stored
         self.images_store = spider.settings.get("IMAGES_STORE")
 
-        # Initialize the Google Cloud Storage client and bucket
+        # Initialize GCS client and bucket only if configured
         self.gcp_bucket_name = spider.settings.get("GCP_BUCKET_NAME")
         self.folder_name = spider.settings.get("GCP_FOLDER_NAME")
-        self.storage_client = storage.Client()
-        self.bucket = self.storage_client.bucket(self.gcp_bucket_name)
+        self.storage_client = None
+        self.bucket = None
+
+        # Only initialize GCS if bucket name and folder are provided
+        if self.gcp_bucket_name and self.folder_name:
+            try:
+                # Initialize GCS client with explicit credentials
+                credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+                if not credentials_path:
+                    self.logger.error(
+                        "GOOGLE_APPLICATION_CREDENTIALS environment variable not set"
+                    )
+                    raise ValueError("Missing GCP credentials path")
+
+                if not os.path.exists(credentials_path):
+                    self.logger.error(
+                        f"GCP credentials file not found at: {credentials_path}"
+                    )
+                    raise FileNotFoundError(
+                        f"GCP credentials file not found: {credentials_path}"
+                    )
+
+                self.storage_client = storage.Client()
+                self.bucket = self.storage_client.bucket(self.gcp_bucket_name)
+
+                # Verify bucket exists and we have access
+                if not self.bucket.exists():
+                    raise ValueError(
+                        f"GCS bucket '{self.gcp_bucket_name}' does not exist"
+                    )
+
+                self.logger.info(
+                    f"Successfully initialized Google Cloud Storage client with bucket: {self.gcp_bucket_name}"
+                )
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to initialize Google Cloud Storage: {str(e)}"
+                )
+                self.logger.error("Make sure you have:")
+                self.logger.error(
+                    "1. Set GOOGLE_APPLICATION_CREDENTIALS environment variable"
+                )
+                self.logger.error(
+                    "2. Placed the service-account.json file in the correct location"
+                )
+                self.logger.error(
+                    "3. Granted necessary permissions to the service account"
+                )
+                raise e
+        else:
+            self.logger.info("GCS not configured - images will be stored locally only")
 
         # Cache for storing image URL to GCS URL mapping
         self.image_url_to_gcs_url = {}
