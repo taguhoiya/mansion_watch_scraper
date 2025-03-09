@@ -73,12 +73,16 @@ async def test_seed_database_production_environment(
     mock_env_vars_seed: Dict[str, str],
 ) -> None:
     """Test that seeding is not allowed in production environment."""
-    with patch.dict(os.environ, {"ENV": "production"}, clear=True):
-        with patch("seed.os.getenv") as mock_getenv:
-            mock_getenv.return_value = "production"
-            with patch("sys.exit") as mock_exit:
-                await seed_database()
-                mock_exit.assert_called_once_with(1)
+    with patch.dict(os.environ, {"ENV": "production"}, clear=True), patch(
+        "seed.os.getenv", return_value="production"
+    ), patch("seed.ENV", "production"), patch(
+        "motor.motor_asyncio.AsyncIOMotorClient"
+    ) as mock_client:
+        with pytest.raises(SystemExit) as exc_info:
+            await seed_database()
+        assert exc_info.value.code == 1
+        # Verify that we never tried to create a MongoDB client
+        mock_client.assert_not_called()
 
 
 @pytest.mark.asyncio
