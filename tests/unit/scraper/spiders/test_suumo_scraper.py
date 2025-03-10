@@ -15,6 +15,53 @@ class TestMansionWatchSpider:
             url="https://example.com", line_user_id="Utest_user_id"
         )
 
+    def test_process_hidden_input_url(self, spider):
+        """Test processing of hidden input URLs."""
+        # Test with valid URL
+        url = "https://example.com?src=path/to/image.jpg&other=param"
+        result = spider._process_hidden_input_url(url)
+        assert result == "https://img01.suumo.com/path/to/image.jpg"
+
+        # Test with relative URL
+        url = "https://example.com?src=/images/property.jpg&other=param"
+        result = spider._process_hidden_input_url(url)
+        assert result == "https://img01.suumo.com/images/property.jpg"
+
+        # Test with invalid URL
+        url = "https://example.com/invalid"
+        result = spider._process_hidden_input_url(url)
+        assert result is None
+
+    def test_process_lightbox_url(self, spider):
+        """Test processing of lightbox gallery URLs."""
+        # Test with relative URL
+        url = "/images/property.jpg"
+        result = spider._process_lightbox_url(url)
+        assert result == "https://suumo.jp/images/property.jpg"
+
+        # Test with absolute URL
+        url = "https://suumo.jp/images/property.jpg"
+        result = spider._process_lightbox_url(url)
+        assert result == url
+
+    def test_process_image_urls(self, spider):
+        """Test processing of mixed image URLs."""
+        # Test with mixed URLs
+        urls = [
+            "https://example.com/spacer.gif",  # Should be skipped
+            "https://example.com?src=property1.jpg",  # Hidden input
+            "https://example.com?src=property2.jpg",  # Hidden input (duplicate)
+            "/images/property3.jpg",  # Lightbox
+            "https://suumo.jp/images/property4.jpg",  # Lightbox (absolute)
+        ]
+
+        result = spider._process_image_urls(urls)
+        assert len(result) == 4
+        assert "https://img01.suumo.com/property1.jpg" in result
+        assert "https://img01.suumo.com/property2.jpg" in result
+        assert "https://suumo.jp/images/property3.jpg" in result
+        assert "https://suumo.jp/images/property4.jpg" in result
+
     @patch("mansion_watch_scraper.spiders.suumo_scraper.MansionWatchSpider.logger")
     def test_errback_httpbin_404(self, mock_logger, spider):
         """Test the errback_httpbin method with a 404 error."""

@@ -957,15 +957,18 @@ class SuumoImagesPipeline(ImagesPipeline):
             return []
 
         # Upload each image to GCS and collect URLs
-        gcs_image_urls = [
-            url
-            for url in (self._upload_image_to_gcs(path) for path in image_paths)
-            if url
-        ]
+        gcs_image_urls = []
+        for path in image_paths:
+            url = self._upload_image_to_gcs(path)
+            if url:
+                gcs_image_urls.append(url)
 
-        self.logger.info(f"Uploaded {len(gcs_image_urls)} images to GCS")
+        # Log the actual number of successfully uploaded images
+        if gcs_image_urls:
+            self.logger.info(
+                f"Successfully uploaded {len(gcs_image_urls)} images to GCS"
+            )
 
-        # No need to clean up individual files here - we'll clean up everything at once later
         return gcs_image_urls
 
     def _log_image_processing_results(
@@ -980,17 +983,22 @@ class SuumoImagesPipeline(ImagesPipeline):
             new_gcs_urls: List of newly uploaded GCS URLs
             failed_downloads: List of failed downloads
         """
-        if new_gcs_urls:
-            if existing_image_count > 0:
+        total_images = existing_image_count + len(new_gcs_urls)
+        if total_images > 0:
+            if existing_image_count > 0 and new_gcs_urls:
                 # Mix of existing and new images
                 self.logger.info(
-                    f"Updated item with {existing_image_count + len(new_gcs_urls)} GCS image URLs "
                     f"({existing_image_count} already existed, {len(new_gcs_urls)} newly uploaded)"
                 )
-            else:
+            elif new_gcs_urls:
                 # Only new images
                 self.logger.info(
                     f"Updated item with {len(new_gcs_urls)} newly uploaded GCS image URLs"
+                )
+            elif existing_image_count > 0:
+                # Only existing images
+                self.logger.info(
+                    f"Updated item with {existing_image_count} existing GCS image URLs"
                 )
         elif existing_image_count > 0 and original_image_count > existing_image_count:
             # Some images existed but others failed to download/upload
@@ -999,7 +1007,6 @@ class SuumoImagesPipeline(ImagesPipeline):
                 f"images already existed in GCS, {original_image_count - existing_image_count - len(failed_downloads)} "
                 f"failed to process"
             )
-        # No log if all images already existed (to avoid confusion)
 
     def item_completed(self, results, item, info):
         """

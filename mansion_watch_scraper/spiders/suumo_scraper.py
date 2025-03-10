@@ -1,4 +1,4 @@
-import html
+import urllib.parse
 from datetime import timedelta
 from typing import List, Optional
 
@@ -234,7 +234,7 @@ class MansionWatchSpider(scrapy.Spider):
         all_urls = self._extract_urls_from_patterns(response, xpath_patterns)
 
         # Step 3: Process and filter the URLs
-        image_urls = self._process_image_urls(response, all_urls)
+        image_urls = self._process_image_urls(all_urls)
 
         # Step 4: Log results
         if image_urls:
@@ -249,10 +249,10 @@ class MansionWatchSpider(scrapy.Spider):
     def _get_image_xpath_patterns(self):
         """Get XPath patterns for image URLs."""
         return [
-            # Get image URLs from hidden input fields
-            "//input[starts-with(@id, 'imgG')]/@value",
-            # Get image URLs from lightbox gallery
+            # Get high-resolution image URLs from lightbox gallery
             "//*[@id='js-lightbox']//a[@class='carousel_item-object js-slideLazy js-lightboxItem']/@data-src",
+            # Get resized image URLs from hidden input fields
+            "//input[starts-with(@id, 'imgG')]/@value",
         ]
 
     def _extract_urls_from_patterns(
@@ -268,44 +268,101 @@ class MansionWatchSpider(scrapy.Spider):
             List of extracted URLs
         """
         all_urls = []
-        for pattern in patterns:
-            urls = response.xpath(pattern).getall()
-            if urls:
-                all_urls.extend(urls)
+
+        # First try to get carousel images
+        carousel_urls = response.xpath(patterns[0]).getall()
+        if carousel_urls:
+            self.logger.info(f"Found {len(carousel_urls)} carousel images")
+            all_urls.extend(carousel_urls)
+            # Remove duplicates while preserving order
+            return list(dict.fromkeys(all_urls))
+
+        # If no carousel images found, try imgG images
+        imgg_urls = response.xpath(patterns[1]).getall()
+        if imgg_urls:
+            self.logger.info(f"Found {len(imgg_urls)} imgG images")
+            all_urls.extend(imgg_urls)
+        else:
+            self.logger.warning("No images found in either carousel or imgG")
 
         # Remove duplicates while preserving order
         return list(dict.fromkeys(all_urls))
 
-    def _process_image_urls(self, response: Response, urls: List[str]) -> List[str]:
-        """Process and filter image URLs.
+    def _process_hidden_input_url(self, image_url: str) -> Optional[str]:
+        """Process URL from hidden input field.
 
         Args:
-            response: Scrapy response object
-            urls: List of URLs to process
+            image_url: URL to process
 
         Returns:
-            List of processed image URLs
+            Processed URL or None if processing fails
         """
-        processed_urls = set()
-        for url in urls:
-            # Split the value by comma to separate URL from description
-            parts = url.split(",")
-            if not parts:
+        if "src=" not in image_url:
+            return None
+
+        try:
+            src_param = image_url.split("src=")[1].split("&")[0]
+            src_param = urllib.parse.unquote(src_param)
+            return (
+                src_param
+                if src_param.startswith(("http://", "https://"))
+                else f"https://img01.suumo.com/{src_param}"
+            )
+        except Exception as e:
+            self.logger.error(f"Error processing URL from hidden input: {e}")
+            return None
+
+    def _process_lightbox_url(self, image_url: str) -> str:
+        """Process URL from lightbox gallery.
+
+        Args:
+            image_url: URL to process
+
+        Returns:
+            Processed URL with proper domain
+        """
+        return (
+            image_url
+            if image_url.startswith(("http://", "https://"))
+            else f"https://suumo.jp/{image_url}"
+        )
+
+    def _should_skip_url(self, image_url: str) -> bool:
+        """Check if URL should be skipped.
+
+        Args:
+            image_url: URL to check
+
+        Returns:
+            True if URL should be skipped, False otherwise
+        """
+        return "spacer.gif" in image_url
+
+    def _process_image_urls(self, image_urls: List[str]) -> List[str]:
+        """Process image URLs to ensure they are properly formatted.
+
+        Args:
+            image_urls: List of URLs to process
+
+        Returns:
+            List of processed URLs
+        """
+        processed_urls = []
+
+        for image_url in image_urls:
+            if self._should_skip_url(image_url):
                 continue
 
-            # Get the URL part and remove any HTML entities
-            image_url = parts[0].strip()
-            image_url = html.unescape(image_url)
+            processed_url = None
+            if "img01.suumo.com" in image_url:
+                processed_url = self._process_hidden_input_url(image_url)
+            elif "suumo.jp" in image_url:
+                processed_url = self._process_lightbox_url(image_url)
 
-            # Skip spacer.gif and other utility images
-            if "spacer.gif" in image_url or "btn.gif" in image_url:
-                continue
+            if processed_url and processed_url not in processed_urls:
+                processed_urls.append(processed_url)
 
-            self.logger.debug(f"Found image URL: {image_url}")
-            processed_urls.add(image_url)
-
-        self.logger.info(f"Total unique image URLs found: {len(processed_urls)}")
-        return list(processed_urls)
+        return processed_urls
 
     def _extract_property_overview(
         self,
