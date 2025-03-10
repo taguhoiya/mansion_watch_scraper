@@ -12,7 +12,7 @@ class TestMansionWatchSpider:
     def spider(self):
         """Create a spider instance for testing."""
         return MansionWatchSpider(
-            url="https://example.com", line_user_id="test_user_id"
+            url="https://example.com", line_user_id="Utest_user_id"
         )
 
     @patch("mansion_watch_scraper.spiders.suumo_scraper.MansionWatchSpider.logger")
