@@ -303,6 +303,8 @@ class MansionWatchSpider(scrapy.Spider):
         try:
             src_param = image_url.split("src=")[1].split("&")[0]
             src_param = urllib.parse.unquote(src_param)
+            # Remove leading slash if present to avoid double slashes
+            src_param = src_param.lstrip("/")
             return (
                 src_param
                 if src_param.startswith(("http://", "https://"))
@@ -321,6 +323,8 @@ class MansionWatchSpider(scrapy.Spider):
         Returns:
             Processed URL with proper domain
         """
+        # Remove leading slash if present to avoid double slashes
+        image_url = image_url.lstrip("/")
         return (
             image_url
             if image_url.startswith(("http://", "https://"))
@@ -354,9 +358,9 @@ class MansionWatchSpider(scrapy.Spider):
                 continue
 
             processed_url = None
-            if "img01.suumo.com" in image_url:
+            if "src=" in image_url:
                 processed_url = self._process_hidden_input_url(image_url)
-            elif "suumo.jp" in image_url:
+            elif image_url.startswith("/") or "suumo.jp" in image_url:
                 processed_url = self._process_lightbox_url(image_url)
 
             if processed_url and processed_url not in processed_urls:
