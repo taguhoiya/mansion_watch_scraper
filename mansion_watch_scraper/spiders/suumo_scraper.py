@@ -38,12 +38,14 @@ class MansionWatchSpider(scrapy.Spider):
             url: The URL to scrape
             line_user_id: The Line user ID
         Raises:
-            ValueError: If url or line_user_id is missing
+            ValueError: If url or line_user_id is missing or invalid
         """
         super(MansionWatchSpider, self).__init__(*args, **kwargs)
         if url is not None:
             self.start_urls = [url]
         if line_user_id is not None:
+            if not line_user_id.startswith("U"):
+                raise ValueError("line_user_id must start with U")
             self.line_user_id = line_user_id
         if not line_user_id or not url:
             raise ValueError(
@@ -247,6 +249,8 @@ class MansionWatchSpider(scrapy.Spider):
     def _get_image_xpath_patterns(self):
         """Get XPath patterns for image URLs."""
         return [
+            # Get image URLs from hidden input fields
+            "//input[starts-with(@id, 'imgG')]/@value",
             # Get image URLs from lightbox gallery
             "//*[@id='js-lightbox']//a[@class='carousel_item-object js-slideLazy js-lightboxItem']/@data-src",
         ]
@@ -293,9 +297,9 @@ class MansionWatchSpider(scrapy.Spider):
             image_url = parts[0].strip()
             image_url = html.unescape(image_url)
 
-            # Make URL absolute if it's relative
-            if image_url.startswith("/"):
-                image_url = f"https://img01.suumo.com{image_url}"
+            # Skip spacer.gif and other utility images
+            if "spacer.gif" in image_url or "btn.gif" in image_url:
+                continue
 
             self.logger.debug(f"Found image URL: {image_url}")
             processed_urls.add(image_url)
