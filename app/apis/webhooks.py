@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import re
+from typing import List, Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -116,6 +117,86 @@ def extract_suumo_url(text: str) -> str:
     return ""
 
 
+def find_valid_suumo_url(urls: List[str]) -> Optional[str]:
+    """
+    Find the first valid SUUMO property URL from a list of URLs.
+
+    Args:
+        urls: List of URLs to check
+
+    Returns:
+        The first valid SUUMO property URL found, or None if none found
+    """
+    for url in urls:
+        if is_valid_property_url(url) and "suumo.jp" in url:
+            return url
+    return None
+
+
+def is_valid_message_event(event: MessageEvent) -> bool:
+    """
+    Check if the event is a valid message event.
+
+    Args:
+        event: The LINE message event
+
+    Returns:
+        True if the event is valid, False otherwise
+    """
+    return bool(
+        hasattr(event, "message")
+        and isinstance(event.message, TextMessageContent)
+        and hasattr(event, "source")
+        and hasattr(event.source, "user_id")
+        and hasattr(event, "reply_token")
+        and event.reply_token is not None
+    )
+
+
+def get_message_info(event: MessageEvent) -> tuple[str, str, str]:
+    """
+    Extract message information from the event.
+
+    Args:
+        event: The LINE message event
+
+    Returns:
+        Tuple of (message_text, line_user_id, reply_token)
+    """
+    return (
+        event.message.text,
+        event.source.user_id,
+        event.reply_token,
+    )
+
+
+async def send_inquiry_response(reply_token: str) -> None:
+    """
+    Send the inquiry response message.
+
+    Args:
+        reply_token: The LINE reply token
+    """
+    await send_reply(
+        reply_token,
+        "お問い合わせありがとうございます！\n"
+        "SUUMOの物件URLを送っていただければ、情報を取得いたします。",
+    )
+
+
+async def send_invalid_url_response(reply_token: str) -> None:
+    """
+    Send the invalid URL response message.
+
+    Args:
+        reply_token: The LINE reply token
+    """
+    await send_reply(
+        reply_token,
+        "SUUMOの物件ページURLを送信してください",
+    )
+
+
 async def process_text_message(event: MessageEvent) -> None:
     """
     Process a text message from a LINE user.
@@ -124,49 +205,35 @@ async def process_text_message(event: MessageEvent) -> None:
         event: The LINE message event
     """
     try:
-        if not hasattr(event, "message") or not isinstance(
-            event.message, TextMessageContent
-        ):
+        # Early return for invalid message events
+        if not is_valid_message_event(event):
             return
 
-        message_text = event.message.text
-        line_user_id = event.source.user_id
-        reply_token = event.reply_token
+        # Extract message information
+        message_text, line_user_id, reply_token = get_message_info(event)
         logger.info(f"Processing message from {line_user_id}: {message_text}")
 
-        # Check if the message contains a SUUMO URL
-        url = extract_suumo_url(message_text)
-        if not url:
-            logger.info(f"No valid SUUMO URL found in message: {message_text}")
+        # Extract URLs from the message
+        urls = extract_urls(message_text)
+
+        # Case 3: No URL in message - send inquiry response
+        if not urls:
+            await send_inquiry_response(reply_token)
             return
 
-        # Handle the scraping process
-        await handle_scraping(reply_token, url, line_user_id)
+        # Check if any of the URLs is a valid SUUMO property URL
+        valid_suumo_url = find_valid_suumo_url(urls)
+
+        # Case 2: Invalid URL - send request for SUUMO URL
+        if not valid_suumo_url:
+            await send_invalid_url_response(reply_token)
+            return
+
+        # Case 1: Valid SUUMO URL - proceed with scraping
+        await handle_scraping(reply_token, valid_suumo_url, line_user_id)
 
     except Exception as e:
-        logger.error(f"Error processing text message: {str(e)}")
-        # Try to send an error message if possible
-        try:
-            if (
-                event
-                and hasattr(event, "reply_token")
-                and hasattr(event, "source")
-                and hasattr(event.source, "user_id")
-            ):
-                # First try to use the reply token
-                try:
-                    await send_reply(
-                        event.reply_token,
-                        "申し訳ありません。メッセージの処理中にエラーが発生しました。",
-                    )
-                except Exception:
-                    # If reply fails, fall back to push message
-                    await send_push_message(
-                        event.source.user_id,
-                        "申し訳ありません。メッセージの処理中にエラーが発生しました。",
-                    )
-        except Exception as inner_e:
-            logger.error(f"Failed to send error message: {str(inner_e)}")
+        await handle_message_error(event, e)
 
 
 async def handle_scraping(reply_token: str, url: str, line_user_id: str) -> None:
@@ -457,3 +524,41 @@ async def process_follow_event(event: FollowEvent) -> None:
     except Exception as e:
         logger.error(f"Error processing follow event: {str(e)}")
         # Consider implementing a retry mechanism or error notification system
+
+
+async def handle_message_error(event: MessageEvent, error: Exception) -> None:
+    """
+    Handle errors that occur during message processing.
+
+    Args:
+        event: The LINE message event
+        error: The exception that occurred
+    """
+    logger.error(f"Error processing text message: {str(error)}")
+    try:
+        # For events without a reply token, use push message
+        if event.reply_token is None:
+            await send_push_message(
+                event.source.user_id,
+                "申し訳ありません。メッセージの処理中にエラーが発生しました。",
+            )
+            return
+
+        # For invalid events with a reply token, don't try to send any messages
+        if not is_valid_message_event(event):
+            return
+
+        # For valid events with a reply token, try to use it
+        try:
+            await send_reply(
+                event.reply_token,
+                "申し訳ありません。メッセージの処理中にエラーが発生しました。",
+            )
+        except Exception:
+            # If reply fails, fall back to push message
+            await send_push_message(
+                event.source.user_id,
+                "申し訳ありません。メッセージの処理中にエラーが発生しました。",
+            )
+    except Exception as inner_e:
+        logger.error(f"Failed to send error message: {str(inner_e)}")
