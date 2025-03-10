@@ -42,9 +42,9 @@ async def check_environment() -> None:
             f"Seeding is not allowed in production environment (ENV={current_env})"
         )
         sys.exit(1)
-    elif current_env not in ["development", "test"]:
+    elif current_env not in ["development", "test", "docker"]:
         logger.error(
-            f"Invalid environment: {current_env}. Must be one of: development, test"
+            f"Invalid environment: {current_env}. Must be one of: development, test, docker"
         )
         sys.exit(1)
 
