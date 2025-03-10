@@ -983,29 +983,29 @@ class SuumoImagesPipeline(ImagesPipeline):
             new_gcs_urls: List of newly uploaded GCS URLs
             failed_downloads: List of failed downloads
         """
-        total_images = existing_image_count + len(new_gcs_urls)
-        if total_images > 0:
-            if existing_image_count > 0 and new_gcs_urls:
+        if failed_downloads:
+            failed_count = original_image_count - existing_image_count
+            self.logger.info(
+                f"Partial update: {existing_image_count} of {original_image_count} images already existed in GCS, {failed_count} failed to process"
+            )
+        elif existing_image_count == original_image_count:
+            # Don't log anything when all images already exist
+            pass
+        elif new_gcs_urls:
+            if existing_image_count > 0:
                 # Mix of existing and new images
                 self.logger.info(
                     f"({existing_image_count} already existed, {len(new_gcs_urls)} newly uploaded)"
                 )
-            elif new_gcs_urls:
+            else:
                 # Only new images
                 self.logger.info(
                     f"Updated item with {len(new_gcs_urls)} newly uploaded GCS image URLs"
                 )
-            elif existing_image_count > 0:
-                # Only existing images
-                self.logger.info(
-                    f"Updated item with {existing_image_count} existing GCS image URLs"
-                )
-        elif existing_image_count > 0 and original_image_count > existing_image_count:
-            # Some images existed but others failed to download/upload
+        elif existing_image_count > 0:
+            # Only existing images
             self.logger.info(
-                f"Partial update: {existing_image_count} of {original_image_count} "
-                f"images already existed in GCS, {original_image_count - existing_image_count - len(failed_downloads)} "
-                f"failed to process"
+                f"Updated item with {existing_image_count} existing GCS image URLs"
             )
 
     def item_completed(self, results, item, info):
