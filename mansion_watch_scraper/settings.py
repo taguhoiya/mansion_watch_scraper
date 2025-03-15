@@ -121,3 +121,13 @@ IMAGES_RESULT_FIELD = "images"
 
 # Allow image domains for downloading
 IMAGES_DOMAINS = ["img01.suumo.com", "img02.suumo.com", "img03.suumo.com"]
+
+# Configure image pipeline settings
+IMAGES_STORE_FORMAT = "JPEG"
+MEDIA_ALLOW_REDIRECTS = True
+DOWNLOAD_FAIL_ON_DATALOSS = False
+
+# Configure retry settings
+RETRY_ENABLED = True
+RETRY_TIMES = 3
+RETRY_HTTP_CODES = [500, 502, 503, 504, 522, 524, 408, 429, 302]
