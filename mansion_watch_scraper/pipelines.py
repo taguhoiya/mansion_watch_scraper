@@ -823,6 +823,8 @@ class SuumoImagesPipeline(ImagesPipeline):
                     "max_retry_times": 3,  # Allow up to 3 retries
                     "download_timeout": 60,  # Increase timeout to 60 seconds
                     "retry_times": 0,  # Initialize retry counter
+                    "handle_httpstatus_list": [302],  # Handle redirect status
+                    "dont_redirect": False,  # Allow redirects
                 },
                 dont_filter=True,  # Important: Bypass the OffsiteMiddleware filter
                 errback=self._handle_download_error,  # Add error handling callback
@@ -925,7 +927,7 @@ class SuumoImagesPipeline(ImagesPipeline):
 
     def _cleanup_temp_directory(self, directory=None):
         """
-        Clean up temporary directory by removing all files and the directory itself.
+        Clean up temporary directory by removing the tmp directory and all its contents.
 
         Args:
             directory: Directory to clean up. If None, uses self.images_store
@@ -938,16 +940,19 @@ class SuumoImagesPipeline(ImagesPipeline):
             if not target_dir or not os.path.exists(target_dir):
                 return False
 
-            # Use shutil.rmtree for efficient recursive directory removal
-            import shutil
+            # Get the parent tmp directory
+            tmp_dir = os.path.dirname(target_dir)
+            if os.path.exists(tmp_dir):
+                import shutil
 
-            shutil.rmtree(target_dir)
-            self.logger.info(f"Cleaned up temporary directory: {target_dir}")
+                shutil.rmtree(tmp_dir)
+                self.logger.info(
+                    f"Cleaned up tmp directory and all contents: {tmp_dir}"
+                )
+
             return True
         except Exception as e:
-            self.logger.error(
-                f"Error cleaning up temporary directory {target_dir}: {e}"
-            )
+            self.logger.error(f"Error cleaning up temporary directory: {e}")
             return False
 
     def _process_successful_downloads(self, image_paths, property_id):
