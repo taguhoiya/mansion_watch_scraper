@@ -61,17 +61,15 @@ class TestHandleScrapingFunction:
             await handle_scraping(reply_token, url, line_user_id)
 
             # Assert
-            # Only one send_reply call for the initial message
+            # Only one send_reply call for the success message
             assert mock_send_reply.call_count == 1
-            mock_send_reply.assert_any_call(
+            mock_send_reply.assert_called_once_with(
                 reply_token,
-                "物件のスクレイピングを開始しています。少々お待ちください。",
+                "ウォッチリストに追加されました！\n左下のメニューからご確認ください😊\n(反映には1分ほどかかる場合があります)",
             )
 
-            # Completion message sent as push message
-            mock_send_push.assert_called_once_with(
-                line_user_id, "スクレイピングが完了しました！"
-            )
+            # No push message should be sent for success case
+            mock_send_push.assert_not_called()
 
             mock_start_scrapy.assert_called_once_with(
                 url=url, line_user_id=line_user_id
@@ -105,11 +103,11 @@ class TestHandleScrapingFunction:
             await handle_scraping(reply_token, url, line_user_id)
 
             # Assert
-            # Only one send_reply call for the initial message
+            # Only one send_reply call for the success message
             assert mock_send_reply.call_count == 1
-            mock_send_reply.assert_any_call(
+            mock_send_reply.assert_called_once_with(
                 reply_token,
-                "物件のスクレイピングを開始しています。少々お待ちください。",
+                "ウォッチリストに追加されました！\n左下のメニューからご確認ください😊\n(反映には1分ほどかかる場合があります)",
             )
 
             # Property not found message sent as push message
@@ -145,11 +143,11 @@ class TestHandleScrapingFunction:
             await handle_scraping(reply_token, url, line_user_id)
 
             # Assert
-            # Only one send_reply call for the initial message
+            # Only one send_reply call for the success message
             assert mock_send_reply.call_count == 1
-            mock_send_reply.assert_any_call(
+            mock_send_reply.assert_called_once_with(
                 reply_token,
-                "物件のスクレイピングを開始しています。少々お待ちください。",
+                "ウォッチリストに追加されました！\n左下のメニューからご確認ください😊\n(反映には1分ほどかかる場合があります)",
             )
 
             # Error message sent as push message
@@ -184,9 +182,9 @@ class TestHandleScrapingFunction:
             await handle_scraping(reply_token, url, line_user_id)
 
             # Assert
-            mock_send_reply.assert_any_call(
+            mock_send_reply.assert_called_once_with(
                 reply_token,
-                "物件のスクレイピングを開始しています。少々お待ちください。",
+                "ウォッチリストに追加されました！\n左下のメニューからご確認ください😊\n(反映には1分ほどかかる場合があります)",
             )
 
             # Error message sent as push message

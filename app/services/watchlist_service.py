@@ -86,6 +86,10 @@ class WatchlistService:
                 }
             )
 
+        # Only keep the first image URL if available
+        if "image_urls" in prop and prop["image_urls"]:
+            prop["image_urls"] = [prop["image_urls"][0]]
+
         return UserWatchlist(**prop)
 
     async def _get_property_overview(

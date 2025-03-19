@@ -249,7 +249,7 @@ async def handle_scraping(reply_token: str, url: str, line_user_id: str) -> None
         # Send reply first to provide immediate feedback - only use the reply token once
         await send_reply(
             reply_token,
-            "物件のスクレイピングを開始しています。少々お待ちください。",
+            "ウォッチリストに追加されました！\n左下のメニューからご確認ください😊\n(反映には1分ほどかかる場合があります)",
         )
 
         # Start the scraping process
@@ -262,12 +262,6 @@ async def handle_scraping(reply_token: str, url: str, line_user_id: str) -> None
                 await send_push_message(
                     line_user_id,
                     "指定された物件は見つかりませんでした。URLが正しいか、または物件が削除されていないか確認してください。",
-                )
-            else:
-                # Use push message instead of reply since the reply token can only be used once
-                await send_push_message(
-                    line_user_id,
-                    "スクレイピングが完了しました！",
                 )
         except HTTPException as e:
             logger.error(f"Error calling scrape endpoint: {str(e)}")

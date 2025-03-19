@@ -16,21 +16,18 @@ NEWSPIDER_MODULE = "mansion_watch_scraper.spiders"
 
 
 # Crawl responsibly by identifying yourself (and your website) on the user-agent
-# USER_AGENT = "mansion_watch_scraper (+http://www.yourdomain.com)"
+USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 
 # Obey robots.txt rules
 ROBOTSTXT_OBEY = True
 
 # Configure maximum concurrent requests performed by Scrapy (default: 16)
-# CONCURRENT_REQUESTS = 32
+CONCURRENT_REQUESTS = 1
 
 # Configure a delay for requests for the same website (default: 0)
 # See https://docs.scrapy.org/en/latest/topics/settings.html#download-delay
 # See also autothrottle settings and docs
-# DOWNLOAD_DELAY = 3
-# The download delay setting will honor only one of:
-# CONCURRENT_REQUESTS_PER_DOMAIN = 16
-# CONCURRENT_REQUESTS_PER_IP = 16
+DOWNLOAD_DELAY = 3
 
 # Disable cookies (enabled by default)
 # COOKIES_ENABLED = False
@@ -44,16 +41,55 @@ ROBOTSTXT_OBEY = True
 #    "Accept-Language": "en",
 # }
 
-# Enable or disable spider middlewares
+# Configure spider middlewares
 # See https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 # SPIDER_MIDDLEWARES = {
 #    "mansion_watch_scraper.middlewares.MansionWatchScraperSpiderMiddleware": 543,
 # }
 
-# Enable or disable downloader middlewares
-# See https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
+# Configure retry settings
+RETRY_ENABLED = True
+RETRY_TIMES = 5
+RETRY_HTTP_CODES = [
+    500,
+    502,
+    503,
+    504,
+    522,
+    524,
+    408,
+    429,
+    302,
+    301,
+    303,
+    307,
+    308,
+    403,
+    404,
+]
+
+# Configure download settings
+DOWNLOAD_TIMEOUT = 60
+
+# Configure image pipeline settings
+IMAGES_STORE_FORMAT = "JPEG"
+IMAGES_MIN_HEIGHT = 50
+IMAGES_MIN_WIDTH = 50
+
+# Allow image domains for downloading
+IMAGES_DOMAINS = [
+    "img01.suumo.com",
+    "img02.suumo.com",
+    "img03.suumo.com",
+    "maintenance.suumo.jp",
+]
+
+# Configure downloader middlewares
 DOWNLOADER_MIDDLEWARES = {
-    "scrapy.spidermiddlewares.offsite.OffsiteMiddleware": None,
+    "scrapy.downloadermiddlewares.useragent.UserAgentMiddleware": None,
+    "scrapy.downloadermiddlewares.retry.RetryMiddleware": None,
+    "mansion_watch_scraper.middlewares.AntiScrapingMiddleware": 400,
+    "mansion_watch_scraper.middlewares.CustomRetryMiddleware": 550,
 }
 
 # Enable or disable extensions
@@ -69,19 +105,6 @@ ITEM_PIPELINES = {
     "mansion_watch_scraper.pipelines.SuumoImagesPipeline": 1,
 }
 
-# Enable and configure the AutoThrottle extension (disabled by default)
-# See https://docs.scrapy.org/en/latest/topics/autothrottle.html
-# AUTOTHROTTLE_ENABLED = True
-# The initial download delay
-# AUTOTHROTTLE_START_DELAY = 5
-# The maximum download delay to be set in case of high latencies
-# AUTOTHROTTLE_MAX_DELAY = 60
-# The average number of requests Scrapy should be sending in parallel to
-# each remote server
-# AUTOTHROTTLE_TARGET_CONCURRENCY = 1.0
-# Enable showing throttling stats for every response received:
-# AUTOTHROTTLE_DEBUG = False
-
 # Enable and configure HTTP caching (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/downloader-middleware.html#httpcache-middleware-settings
 # HTTPCACHE_ENABLED = True
@@ -96,9 +119,6 @@ FEED_EXPORT_ENCODING = "utf-8"
 
 # Set a page count limit for the spider
 CLOSESPIDER_PAGECOUNT = 10
-
-# Set the maximum number of concurrent requests per domain
-CONCURRENT_REQUESTS_PER_DOMAIN = 4
 
 # Set mongo db settings
 # Change the value of MONGO_URI to "mongodb://localhost:27017" if you are running the MongoDB server locally
@@ -118,6 +138,3 @@ GCP_FOLDER_NAME = os.getenv("GCP_FOLDER_NAME")
 # Image pipeline settings
 IMAGES_URLS_FIELD = "image_urls"
 IMAGES_RESULT_FIELD = "images"
-
-# Allow image domains for downloading
-IMAGES_DOMAINS = ["img01.suumo.com", "img02.suumo.com", "img03.suumo.com"]

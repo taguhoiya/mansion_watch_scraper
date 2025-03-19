@@ -1,9 +1,10 @@
+import re
 import urllib.parse
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 import scrapy
-from bson.objectid import ObjectId  # Changed from PyObjectId to ObjectId
+from bson.objectid import ObjectId
 from scrapy.http import Response
 from scrapy.spidermiddlewares.httperror import HttpError
 from twisted.internet.error import DNSLookupError, TCPTimedOutError, TimeoutError
@@ -14,7 +15,6 @@ from app.models.property_overview import (
     PROPERTY_OVERVIEW_TRANSLATION_MAP,
     PropertyOverview,
 )
-from app.services.dates import get_current_time
 from app.services.utils import translate_keys
 from enums.html_element_keys import ElementKeys
 
@@ -249,7 +249,9 @@ class MansionWatchSpider(scrapy.Spider):
     def _get_image_xpath_patterns(self):
         """Get XPath patterns for image URLs."""
         return [
-            # Get high-resolution image URLs from lightbox gallery
+            # Get image URLs from img tags
+            "//div[contains(@class, 'lazyloader')]//img/@src",
+            # Fallback patterns
             "//*[@id='js-lightbox']//a[@class='carousel_item-object js-slideLazy js-lightboxItem']/@data-src",
             # Get resized image URLs from hidden input fields
             "//input[starts-with(@id, 'imgG')]/@value",
@@ -267,26 +269,17 @@ class MansionWatchSpider(scrapy.Spider):
         Returns:
             List of extracted URLs
         """
-        all_urls = []
+        # Try each pattern in order until we find images
+        for pattern in patterns:
+            urls = response.xpath(pattern).getall()
+            if urls:
+                self.logger.info(f"Found {len(urls)} images with pattern {pattern}")
+                # Return immediately when we find images
+                # Remove duplicates while preserving order
+                return list(dict.fromkeys(urls))
 
-        # First try to get carousel images
-        carousel_urls = response.xpath(patterns[0]).getall()
-        if carousel_urls:
-            self.logger.info(f"Found {len(carousel_urls)} carousel images")
-            all_urls.extend(carousel_urls)
-            # Remove duplicates while preserving order
-            return list(dict.fromkeys(all_urls))
-
-        # If no carousel images found, try imgG images
-        imgg_urls = response.xpath(patterns[1]).getall()
-        if imgg_urls:
-            self.logger.info(f"Found {len(imgg_urls)} imgG images")
-            all_urls.extend(imgg_urls)
-        else:
-            self.logger.warning("No images found in either carousel or imgG")
-
-        # Remove duplicates while preserving order
-        return list(dict.fromkeys(all_urls))
+        self.logger.warning("No images found with any pattern")
+        return []
 
     def _process_hidden_input_url(self, image_url: str) -> Optional[str]:
         """Process URL from hidden input field.
@@ -297,21 +290,30 @@ class MansionWatchSpider(scrapy.Spider):
         Returns:
             Processed URL or None if processing fails
         """
-        if "src=" not in image_url:
-            return None
-
         try:
+            # Remove any Japanese text after comma in the value attribute
+            if "," in image_url:
+                image_url = image_url.split(",")[0]
+
+            # If it's already a resizeImage URL, use it as is
+            if "resizeImage?src=" in image_url:
+                return image_url
+
+            if "src=" not in image_url:
+                return None
+
             src_param = image_url.split("src=")[1].split("&")[0]
             src_param = urllib.parse.unquote(src_param)
-            # Remove leading slash if present to avoid double slashes
-            src_param = src_param.lstrip("/")
-            return (
-                src_param
-                if src_param.startswith(("http://", "https://"))
-                else f"https://img01.suumo.com/{src_param}"
-            )
+
+            # If it's already a full URL, use it as is
+            if src_param.startswith(("http://", "https://")):
+                return src_param
+
+            # Otherwise, construct the resizeImage URL
+            return f"https://img01.suumo.com/jj/resizeImage?src={src_param}"
         except Exception as e:
             self.logger.error(f"Error processing URL from hidden input: {e}")
+            self.logger.error(f"Problem URL: {image_url}")
             return None
 
     def _process_lightbox_url(self, image_url: str) -> str:
@@ -495,64 +497,54 @@ class MansionWatchSpider(scrapy.Spider):
         return CommonOverview(**overview_dict)
 
     def parse(self, response: Response):
-        """Parse the scraped data from the response.
+        """Parse the response from SUUMO.
 
         Args:
-            response: Scrapy response object
+            response: Response object
+
         Yields:
-            Dictionary containing all extracted property information
+            Item with property information
         """
-        self.logger.info("Successful response from %s", response.url)
-        current_time = get_current_time()
+        try:
+            # Extract property information
+            property_info = self._extract_property_info(response)
+            if not property_info:
+                self.logger.error("Failed to extract property information")
+                return None
 
-        # Check if the response URL is a redirect to a library page (sold-out property)
-        original_url = response.meta.get("original_url", "")
-        is_redirected_to_library = self._is_redirected_to_library(
-            response, original_url
-        )
+            # Extract image URLs
+            image_urls = self._extract_image_urls(response)
+            if not image_urls:
+                self.logger.warning("No image URLs found")
+                return None
 
-        # Step 1: Extract property name and validate
-        property_name = self._extract_property_name(response)
-
-        # For library pages, we don't need to log an error if property name is not found
-        if not is_redirected_to_library:
-            self._validate_property_name(property_name, response.url)
-
-        # Step 2: Extract property data
-        property_obj = self._create_property_object(
-            response, property_name, current_time, is_redirected_to_library
-        )
-
-        # Step 3: Create user property data
-        user_property_dict = self._create_user_property_dict(current_time)
-
-        # Step 4: Extract overview data or create default objects for library pages
-        if is_redirected_to_library:
-            # For library pages (sold-out properties), create default overview objects
-            # to avoid validation errors
-            self.logger.info(
-                "Creating default overview objects for library page (sold-out property)"
-            )
-            property_overview = self._create_default_property_overview(
-                current_time, None
-            )
-            common_overview = self._create_default_common_overview(current_time, None)
-        else:
-            # For normal property pages, extract overview data as usual
-            property_overview = self._extract_property_overview(
-                response, property_name, current_time, None
-            )
-            common_overview = self._extract_common_overview(
-                response, current_time, None
+            # Create property item with image URLs
+            property_item = Property(
+                **property_info,
+                image_urls=image_urls,  # Include image URLs in the property item
+                line_user_id=self.line_user_id,
+                url=response.url,
+                last_aggregated_at=datetime.now(),
+                next_aggregated_at=datetime.now() + timedelta(days=3),
+                is_active=True,  # Add is_active field
             )
 
-        # Step 5: Yield the complete item
-        yield {
-            "properties": property_obj,
-            "user_properties": user_property_dict,
-            "property_overviews": property_overview,
-            "common_overviews": common_overview,
-        }
+            # Create item dictionary with both property data and image URLs
+            item = {
+                "properties": property_item,
+                "user_properties": {
+                    "line_user_id": self.line_user_id,
+                    "last_aggregated_at": datetime.now(),
+                    "next_aggregated_at": datetime.now() + timedelta(days=3),
+                },
+                "image_urls": image_urls,  # Add image URLs for the image pipeline
+            }
+
+            yield item
+
+        except Exception as e:
+            self.logger.error(f"Error in parse: {e}")
+            return None
 
     def _validate_property_name(self, property_name: Optional[str], url: str) -> None:
         """Validate that a property name was found.
@@ -604,29 +596,31 @@ class MansionWatchSpider(scrapy.Spider):
             Default PropertyOverview object
         """
         # Create a dictionary with default values for all required fields
+        none_value = "情報なし (売却済み)"
+
         overview_dict = {
-            "sales_schedule": "情報なし (売却済み)",
-            "event_information": "情報なし (売却済み)",
-            "number_of_units_for_sale": "情報なし (売却済み)",
-            "highest_price_range": "情報なし (売却済み)",
-            "price": "情報なし (売却済み)",
-            "maintenance_fee": "情報なし (売却済み)",
-            "repair_reserve_fund": "情報なし (売却済み)",
-            "first_repair_reserve_fund": "情報なし (売却済み)",
-            "other_expenses": "情報なし (売却済み)",
-            "floor_plan": "情報なし (売却済み)",
-            "area": "情報なし (売却済み)",
-            "other_area": "情報なし (売却済み)",
-            "delivery_time": "情報なし (売却済み)",
-            "completion_time": "情報なし (売却済み)",
-            "floor": "情報なし (売却済み)",
-            "direction": "情報なし (売却済み)",
-            "energy_consumption_performance": "情報なし (売却済み)",
-            "insulation_performance": "情報なし (売却済み)",
-            "estimated_utility_cost": "情報なし (売却済み)",
-            "renovation": "情報なし (売却済み)",
-            "other_restrictions": "情報なし (売却済み)",
-            "other_overview_and_special_notes": "情報なし (売却済み)",
+            "sales_schedule": none_value,
+            "event_information": none_value,
+            "number_of_units_for_sale": none_value,
+            "highest_price_range": none_value,
+            "price": none_value,
+            "maintenance_fee": none_value,
+            "repair_reserve_fund": none_value,
+            "first_repair_reserve_fund": none_value,
+            "other_expenses": none_value,
+            "floor_plan": none_value,
+            "area": none_value,
+            "other_area": none_value,
+            "delivery_time": none_value,
+            "completion_time": none_value,
+            "floor": none_value,
+            "direction": none_value,
+            "energy_consumption_performance": none_value,
+            "insulation_performance": none_value,
+            "estimated_utility_cost": none_value,
+            "renovation": none_value,
+            "other_restrictions": none_value,
+            "other_overview_and_special_notes": none_value,
             "created_at": current_time,
             "updated_at": current_time,
             "property_id": property_id,
@@ -735,3 +729,81 @@ class MansionWatchSpider(scrapy.Spider):
             "last_aggregated_at": current_time,
             "next_aggregated_at": current_time + timedelta(days=3),
         }
+
+    def _extract_property_info(self, response):
+        """Extract property information from the response.
+
+        Args:
+            response: Response object
+
+        Returns:
+            Dictionary containing property information
+        """
+        try:
+            # Extract property name from title
+            title = response.xpath("//title/text()").get()
+            if not title:
+                self.logger.error("Failed to extract title")
+                return None
+
+            # Extract property name from title (format: "【SUUMO】PropertyName 中古マンション物件情報")
+            property_name = (
+                title.split("【")[1].split("】")[1].split(" 中古マンション")[0]
+            )
+            if not property_name:
+                self.logger.error("Failed to extract property name from title")
+                return None
+
+            # Extract property price from h1 tag
+            price_text = response.xpath(
+                "//h1[contains(@class, 'mainIndex') and (contains(@class, 'mainIndexK') or contains(@class, 'mainIndexR'))]/text()"
+            ).get()
+            if not price_text:
+                self.logger.error("Failed to extract price from h1 tag")
+                return None
+
+            # Extract price value (format: "PropertyName 7880万円（1LDK）")
+            price_match = re.search(r"(\d+)万円", price_text)
+            if not price_match:
+                self.logger.error("Failed to extract price value")
+                return None
+
+            price = int(price_match.group(1))
+
+            # Extract property address from table data
+            address = response.xpath(
+                "//td[preceding-sibling::th/div[contains(text(), '所在地')]]/text()"
+            ).get()
+            if not address:
+                self.logger.error("Failed to extract property address")
+                return None
+
+            # Extract property size from table data
+            size_text = response.xpath(
+                "//td[preceding-sibling::th/div[contains(text(), '専有面積')]]/text()"
+            ).get()
+            if not size_text:
+                self.logger.error("Failed to extract property size")
+                return None
+
+            # Convert size text to float (in square meters)
+            # Remove non-numeric characters except decimal point and convert to float
+            size = float("".join(c for c in size_text if c.isdigit() or c == "."))
+
+            # Create property info dictionary
+            property_info = {
+                "name": property_name.strip(),
+                "price": price,
+                "address": address.strip(),
+                "size": size,
+                "status": "active",  # Default status
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
+            }
+
+            self.logger.info(f"Successfully extracted property info: {property_info}")
+            return property_info
+
+        except Exception as e:
+            self.logger.error(f"Error extracting property information: {e}")
+            return None

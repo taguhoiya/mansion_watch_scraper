@@ -12,6 +12,23 @@ permissions:
   id-token: write
   contents: read
 
+env:
+  MONGO_URI: mongodb://localhost:27017
+  MONGO_DATABASE: mansion_watch
+  COLLECTION_PROPERTIES: properties
+  COLLECTION_USER_PROPERTIES: user_properties
+  COLLECTION_PROPERTY_OVERVIEWS: property_overviews
+  COLLECTION_COMMON_OVERVIEWS: common_overviews
+  COLLECTION_PROPERTY_IMAGES: property_images
+  IMAGES_STORE: tmp/images
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GCP_BUCKET_NAME: ${{ secrets.GCP_BUCKET_NAME }}
+  GCP_FOLDER_NAME: property_images
+  GCS_IMAGE_QUALITY: 30
+  LOG_LEVEL: DEBUG
+  LINE_CHANNEL_SECRET: ${{ secrets.LINE_CHANNEL_SECRET }}
+  LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+
 jobs:
   unit-tests:
     runs-on: ubuntu-latest

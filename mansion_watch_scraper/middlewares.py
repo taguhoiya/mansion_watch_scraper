@@ -3,9 +3,16 @@
 # See documentation in:
 # https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 
+import random
+import time
+import uuid
+
+from scrapy import signals
+from scrapy.downloadermiddlewares.retry import RetryMiddleware
+from scrapy.utils.response import response_status_message
+
 # useful for handling different item types with a single interface
 # from itemadapter import ItemAdapter, is_item
-from scrapy import signals
 
 
 class MansionWatchScraperSpiderMiddleware:
@@ -45,7 +52,7 @@ class MansionWatchScraperSpiderMiddleware:
     def process_start_requests(self, start_requests, spider):
         # Called with the start requests of the spider, and works
         # similarly to the process_spider_output() method, except
-        # that it doesn’t have a response associated.
+        # that it doesn't have a response associated.
 
         # Must return only requests (not items).
         for r in start_requests:
@@ -100,3 +107,115 @@ class MansionWatchScraperDownloaderMiddleware:
 
     def spider_opened(self, spider):
         spider.logger.info("Spider opened: %s" % spider.name)
+
+
+class AntiScrapingMiddleware:
+    """Middleware to handle anti-scraping measures."""
+
+    def __init__(self):
+        """Initialize the middleware."""
+        self.user_agents = [
+            # Chrome
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            # Firefox
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14.3; rv:123.0) Gecko/20100101 Firefox/123.0",
+            # Safari
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+            # Edge
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0",
+        ]
+
+        # Common headers for all requests
+        self.common_headers = {
+            "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Sec-Ch-Ua": '"Not A(Brand";v="99", "Chromium";v="122"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"macOS"',
+            "Upgrade-Insecure-Requests": "1",
+            "Cache-Control": "max-age=0",
+        }
+        # Headers specific to regular page requests
+        self.page_specific_headers = {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-User": "?1",
+        }
+        # Headers specific to image requests
+        self.image_specific_headers = {
+            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            "Sec-Fetch-Dest": "image",
+            "Sec-Fetch-Mode": "no-cors",
+            "Sec-Fetch-Site": "same-origin",
+        }
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        middleware = cls()
+        return middleware
+
+    def process_request(self, request, spider):
+        """Process the request by adding anti-scraping measures."""
+        # Set a random User-Agent
+        request.headers["User-Agent"] = random.choice(self.user_agents)
+
+        # Add common headers
+        request.headers.update(self.common_headers)
+
+        # Add request-specific headers
+        if "resizeImage" in request.url:
+            request.headers.update(self.image_specific_headers)
+            # Add cookies for image requests
+            request.cookies.update(
+                {
+                    "nowtime": str(int(time.time())),  # Current timestamp
+                    "uid": f"uid_{uuid.uuid4().hex[:16]}",  # Random user ID
+                }
+            )
+            # Set referer based on the request's domain
+            parsed_url = request.url.split("/")
+            if len(parsed_url) >= 3:
+                base_url = f"{parsed_url[0]}//{parsed_url[2]}"
+                request.headers["Referer"] = base_url
+                request.headers["Origin"] = base_url
+        else:
+            request.headers.update(self.page_specific_headers)
+
+        # Add random delay between requests
+        time.sleep(random.uniform(2.0, 4.0))
+        return None
+
+    def process_response(self, request, response, spider):
+        return response
+
+
+class CustomRetryMiddleware(RetryMiddleware):
+    """Custom retry middleware with enhanced retry logic."""
+
+    def process_response(self, request, response, spider):
+        if request.meta.get("dont_retry", False):
+            return response
+
+        # Check if the response is an image with zero size or error content
+        if request.url.endswith((".jpg", ".jpeg", ".png")):
+            content_length = len(response.body)
+            content_type = response.headers.get("Content-Type", b"").decode(
+                "utf-8", "ignore"
+            )
+
+            # Retry if image is too small or has wrong content type
+            if content_length < 1000 or "text/html" in content_type:
+                reason = f"Invalid image response (size: {content_length}, type: {content_type})"
+                return self._retry(request, reason, spider) or response
+
+        # Handle other response codes
+        if response.status in self.retry_http_codes:
+            reason = response_status_message(response.status)
+            return self._retry(request, reason, spider) or response
+
+        return response
