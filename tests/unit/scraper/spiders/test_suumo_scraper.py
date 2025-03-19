@@ -20,12 +20,14 @@ class TestMansionWatchSpider:
         # Test with valid URL
         url = "https://example.com?src=path/to/image.jpg&other=param"
         result = spider._process_hidden_input_url(url)
-        assert result == "https://img01.suumo.com/path/to/image.jpg"
+        assert result == "https://img01.suumo.com/jj/resizeImage?src=path/to/image.jpg"
 
         # Test with relative URL
         url = "https://example.com?src=/images/property.jpg&other=param"
         result = spider._process_hidden_input_url(url)
-        assert result == "https://img01.suumo.com/images/property.jpg"
+        assert (
+            result == "https://img01.suumo.com/jj/resizeImage?src=/images/property.jpg"
+        )
 
         # Test with invalid URL
         url = "https://example.com/invalid"
@@ -57,8 +59,8 @@ class TestMansionWatchSpider:
 
         result = spider._process_image_urls(urls)
         assert len(result) == 4
-        assert "https://img01.suumo.com/property1.jpg" in result
-        assert "https://img01.suumo.com/property2.jpg" in result
+        assert "https://img01.suumo.com/jj/resizeImage?src=property1.jpg" in result
+        assert "https://img01.suumo.com/jj/resizeImage?src=property2.jpg" in result
         assert "https://suumo.jp/images/property3.jpg" in result
         assert "https://suumo.jp/images/property4.jpg" in result
 
