@@ -10,6 +10,7 @@ from fastapi import HTTPException, Request
 from linebot.v3.webhooks import FollowEvent, MessageEvent, Source, TextMessageContent
 
 from app.apis.webhooks import (
+    PropertyStatus,
     extract_urls,
     handle_follow_event,
     handle_scraping,
@@ -41,9 +42,19 @@ class TestHandleScrapingFunction:
             mock.return_value = None
             yield mock
 
+    @pytest.fixture
+    def mock_get_property_status(self) -> Generator[AsyncMock, None, None]:
+        """Mock the get_property_status function."""
+        with patch("app.apis.webhooks.get_property_status", autospec=True) as mock:
+            mock.return_value = PropertyStatus(exists=False, user_has_access=False)
+            yield mock
+
     @pytest.mark.asyncio
     async def test_handle_scraping_success(
-        self, mock_send_reply: AsyncMock, mock_start_scrapy: AsyncMock
+        self,
+        mock_send_reply: AsyncMock,
+        mock_start_scrapy: AsyncMock,
+        mock_get_property_status: AsyncMock,
     ) -> None:
         """Test successful scraping process."""
         # Arrange
@@ -77,7 +88,10 @@ class TestHandleScrapingFunction:
 
     @pytest.mark.asyncio
     async def test_handle_scraping_property_not_found(
-        self, mock_send_reply: AsyncMock, mock_start_scrapy: AsyncMock
+        self,
+        mock_send_reply: AsyncMock,
+        mock_start_scrapy: AsyncMock,
+        mock_get_property_status: AsyncMock,
     ) -> None:
         """Test handling a property not found (404) response from the scrape endpoint."""
         # Arrange
@@ -122,7 +136,10 @@ class TestHandleScrapingFunction:
 
     @pytest.mark.asyncio
     async def test_handle_scraping_http_exception(
-        self, mock_send_reply: AsyncMock, mock_start_scrapy: AsyncMock
+        self,
+        mock_send_reply: AsyncMock,
+        mock_start_scrapy: AsyncMock,
+        mock_get_property_status: AsyncMock,
     ) -> None:
         """Test handling of HTTPException during scraping."""
         # Arrange
@@ -158,7 +175,10 @@ class TestHandleScrapingFunction:
 
     @pytest.mark.asyncio
     async def test_handle_scraping_general_exception(
-        self, mock_send_reply: AsyncMock, mock_start_scrapy: AsyncMock
+        self,
+        mock_send_reply: AsyncMock,
+        mock_start_scrapy: AsyncMock,
+        mock_get_property_status: AsyncMock,
     ) -> None:
         """Test handling of general exceptions during scraping."""
         # Arrange

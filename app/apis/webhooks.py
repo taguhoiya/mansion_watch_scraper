@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import re
-from typing import List, Optional
+from typing import List, NamedTuple, Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -30,6 +30,12 @@ logger = logging.getLogger(__name__)
 
 # Configure LINE messaging API client
 configuration = Configuration(access_token=os.getenv("LINE_CHANNEL_ACCESS_TOKEN", ""))
+
+
+class PropertyStatus(NamedTuple):
+    exists: bool
+    user_has_access: bool
+    property_id: Optional[str] = None
 
 
 @router.post(
@@ -236,55 +242,94 @@ async def process_text_message(event: MessageEvent) -> None:
         await handle_message_error(event, e)
 
 
-async def handle_scraping(reply_token: str, url: str, line_user_id: str) -> None:
-    """
-    Handle the scraping process and send appropriate messages to the user.
+async def get_property_status(url: str, line_user_id: str) -> PropertyStatus:
+    """Get property existence and user access status."""
+    db = get_db()
+    properties_collection = db[os.getenv("COLLECTION_PROPERTIES", "properties")]
 
-    Args:
-        reply_token: The LINE reply token
-        url: The URL to scrape
-        line_user_id: The LINE user ID
-    """
+    existing_property = await properties_collection.find_one({"url": url})
+    if not existing_property:
+        return PropertyStatus(exists=False, user_has_access=False)
+
+    user_properties_collection = db[
+        os.getenv("COLLECTION_USER_PROPERTIES", "user_properties")
+    ]
+    has_access = bool(
+        await user_properties_collection.find_one(
+            {"property_id": existing_property["_id"], "line_user_id": line_user_id}
+        )
+    )
+
+    return PropertyStatus(
+        exists=True,
+        user_has_access=has_access,
+        property_id=str(existing_property["_id"]),
+    )
+
+
+async def run_scraping(url: str, line_user_id: str) -> None:
+    """Run scraping process and handle errors."""
     try:
-        # Send reply first to provide immediate feedback - only use the reply token once
+        result = await start_scrapy(url=url, line_user_id=line_user_id)
+        if not isinstance(result, dict) or result.get("status") != "not_found":
+            return
+
+        logger.info(f"Property not found for URL: {url}")
+        await send_push_message(
+            line_user_id,
+            "指定された物件は見つかりませんでした。URLが正しいか、または物件が削除されていないか確認してください。",
+        )
+    except Exception as e:
+        logger.error(f"Error in scraping process: {str(e)}")
+        await send_push_message(
+            line_user_id, "申し訳ありません。リクエストの処理中にエラーが発生しました。"
+        )
+
+
+async def handle_scraping(reply_token: str, url: str, line_user_id: str) -> None:
+    """Handle property scraping and user notification process."""
+    if not url or not line_user_id:
+        logger.error("Missing required parameters")
+        return
+
+    try:
+        property_status = await get_property_status(url, line_user_id)
+
+        if property_status.user_has_access:
+            # User already has access, send appropriate message
+            await send_reply(
+                reply_token,
+                "この物件は既にウォッチリストに追加されています！\n左下のメニューからご確認ください😊",
+            )
+            return
+
+        # Send success message before any potential errors
         await send_reply(
             reply_token,
             "ウォッチリストに追加されました！\n左下のメニューからご確認ください😊\n(反映には1分ほどかかる場合があります)",
         )
 
-        # Start the scraping process
-        try:
-            result = await start_scrapy(url=url, line_user_id=line_user_id)
-
-            # Check if the result indicates a property not found (404)
-            if isinstance(result, dict) and result.get("status") == "not_found":
-                logger.info(f"Property not found for URL: {url}")
+        if not property_status.exists:
+            try:
+                result = await run_scraping(url, line_user_id)
+                if isinstance(result, dict) and result.get("status") == "not_found":
+                    await send_push_message(
+                        line_user_id,
+                        "指定された物件は見つかりませんでした。URLが正しいか、または物件が削除されていないか確認してください。",
+                    )
+            except Exception as e:
+                logger.error(f"Error in scraping process: {str(e)}")
                 await send_push_message(
                     line_user_id,
-                    "指定された物件は見つかりませんでした。URLが正しいか、または物件が削除されていないか確認してください。",
+                    "申し訳ありません。スクレイピング中にエラーが発生しました。",
                 )
-        except HTTPException as e:
-            logger.error(f"Error calling scrape endpoint: {str(e)}")
-            await send_push_message(
-                line_user_id,
-                "申し訳ありません。リクエストの処理中にエラーが発生しました。",
-            )
-        except Exception as e:
-            logger.error(f"General error in scraping process: {str(e)}")
-            await send_push_message(
-                line_user_id,
-                "申し訳ありません。リクエストの処理中にエラーが発生しました。",
-            )
     except Exception as e:
         logger.error(f"Error in handle_scraping: {str(e)}")
-        # Try to send a push message even if the initial reply failed
-        try:
-            await send_push_message(
-                line_user_id,
-                "申し訳ありません。リクエストの処理中にエラーが発生しました。",
-            )
-        except Exception as inner_e:
-            logger.error(f"Failed to send error push message: {str(inner_e)}")
+        # Don't send reply message here since we already sent the success message
+        await send_push_message(
+            line_user_id,
+            "申し訳ありません。リクエストの処理中にエラーが発生しました。",
+        )
 
 
 async def handle_scraping_error(line_user_id: str, error_message: str) -> None:

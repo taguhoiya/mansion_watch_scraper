@@ -8,12 +8,16 @@ from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import FollowEvent, MessageEvent, Source, TextMessageContent
 
 from app.apis.webhooks import (
+    PropertyStatus,
     extract_urls,
+    get_property_status,
     handle_follow_event,
+    handle_scraping,
     handle_text_message,
     is_valid_property_url,
     process_follow_event,
     process_text_message,
+    run_scraping,
     send_reply,
     webhook_message_handler,
 )
@@ -731,3 +735,218 @@ class TestHandleFollowEvent:
         mock_create_task.assert_called_once()
         # Check that process_follow_event was called with the event
         mock_process_follow_event.assert_called_once_with(mock_event)
+
+
+@pytest.mark.webhook
+class TestPropertyStatus:
+    """Tests for PropertyStatus functionality."""
+
+    def test_property_status_creation(self):
+        """Test creating PropertyStatus with different parameters."""
+        # Test with minimal parameters
+        status = PropertyStatus(exists=False, user_has_access=False)
+        assert status.exists is False
+        assert status.user_has_access is False
+        assert status.property_id is None
+
+        # Test with all parameters
+        status = PropertyStatus(exists=True, user_has_access=True, property_id="123")
+        assert status.exists is True
+        assert status.user_has_access is True
+        assert status.property_id == "123"
+
+
+@pytest.mark.webhook
+class TestGetPropertyStatus:
+    """Tests for get_property_status function."""
+
+    @pytest.fixture
+    def mock_db(self) -> Generator[tuple[MagicMock, MagicMock, MagicMock], None, None]:
+        """Create mock database and collections."""
+        with patch("app.apis.webhooks.get_db") as mock_get_db:
+            mock_properties = AsyncMock()
+            mock_user_properties = AsyncMock()
+            mock_db = MagicMock()
+            mock_db.__getitem__.side_effect = {
+                "properties": mock_properties,
+                "user_properties": mock_user_properties,
+            }.__getitem__
+            mock_get_db.return_value = mock_db
+            yield mock_get_db, mock_properties, mock_user_properties
+
+    @pytest.mark.asyncio
+    async def test_property_not_found(self, mock_db):
+        """Test when property is not found in database."""
+        _, mock_properties, _ = mock_db
+        mock_properties.find_one.return_value = None
+
+        status = await get_property_status("test_url", "test_user")
+        assert status.exists is False
+        assert status.user_has_access is False
+        assert status.property_id is None
+
+    @pytest.mark.asyncio
+    async def test_property_exists_user_has_access(self, mock_db):
+        """Test when property exists and user has access."""
+        _, mock_properties, mock_user_properties = mock_db
+        mock_properties.find_one.return_value = {"_id": "123", "url": "test_url"}
+        mock_user_properties.find_one.return_value = {"property_id": "123"}
+
+        status = await get_property_status("test_url", "test_user")
+        assert status.exists is True
+        assert status.user_has_access is True
+        assert status.property_id == "123"
+
+    @pytest.mark.asyncio
+    async def test_property_exists_user_no_access(self, mock_db):
+        """Test when property exists but user doesn't have access."""
+        _, mock_properties, mock_user_properties = mock_db
+        mock_properties.find_one.return_value = {"_id": "123", "url": "test_url"}
+        mock_user_properties.find_one.return_value = None
+
+        status = await get_property_status("test_url", "test_user")
+        assert status.exists is True
+        assert status.user_has_access is False
+        assert status.property_id == "123"
+
+
+@pytest.mark.webhook
+class TestRunScraping:
+    """Tests for run_scraping function."""
+
+    @pytest.fixture
+    def mock_start_scrapy(self) -> Generator[AsyncMock, None, None]:
+        """Mock start_scrapy function."""
+        with patch("app.apis.webhooks.start_scrapy") as mock:
+            yield mock
+
+    @pytest.fixture
+    def mock_send_push_message(self) -> Generator[AsyncMock, None, None]:
+        """Mock send_push_message function."""
+        with patch("app.apis.webhooks.send_push_message") as mock:
+            yield mock
+
+    @pytest.mark.asyncio
+    async def test_successful_scraping(self, mock_start_scrapy, mock_send_push_message):
+        """Test successful scraping operation."""
+        mock_start_scrapy.return_value = {"status": "success"}
+
+        await run_scraping("test_url", "test_user")
+
+        mock_start_scrapy.assert_called_once_with(
+            url="test_url", line_user_id="test_user"
+        )
+        mock_send_push_message.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_property_not_found(self, mock_start_scrapy, mock_send_push_message):
+        """Test when property is not found during scraping."""
+        mock_start_scrapy.return_value = {"status": "not_found"}
+
+        await run_scraping("test_url", "test_user")
+
+        mock_send_push_message.assert_called_once()
+        assert "物件は見つかりませんでした" in mock_send_push_message.call_args[0][1]
+
+    @pytest.mark.asyncio
+    async def test_scraping_error(self, mock_start_scrapy, mock_send_push_message):
+        """Test error handling during scraping."""
+        mock_start_scrapy.side_effect = Exception("Scraping error")
+
+        await run_scraping("test_url", "test_user")
+
+        mock_send_push_message.assert_called_once()
+        assert "エラーが発生しました" in mock_send_push_message.call_args[0][1]
+
+
+@pytest.mark.webhook
+class TestHandleScraping:
+    """Tests for the handle_scraping function."""
+
+    @pytest.fixture
+    def mock_get_property_status(self) -> Generator[AsyncMock, None, None]:
+        """Mock the get_property_status function."""
+        with patch("app.apis.webhooks.get_property_status", autospec=True) as mock:
+            yield mock
+
+    @pytest.fixture
+    def mock_send_reply(self) -> Generator[AsyncMock, None, None]:
+        """Mock the send_reply function."""
+        with patch("app.apis.webhooks.send_reply", autospec=True) as mock:
+            mock.return_value = None
+            yield mock
+
+    @pytest.fixture
+    def mock_run_scraping(self) -> Generator[AsyncMock, None, None]:
+        """Mock the run_scraping function."""
+        with patch("app.apis.webhooks.run_scraping", autospec=True) as mock:
+            mock.return_value = None
+            yield mock
+
+    @pytest.mark.asyncio
+    async def test_missing_parameters(
+        self, mock_get_property_status, mock_send_reply, mock_run_scraping
+    ):
+        """Test handling missing parameters."""
+        await handle_scraping("", "", "")
+        mock_get_property_status.assert_not_called()
+        mock_send_reply.assert_not_called()
+        mock_run_scraping.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_existing_property_user_has_access(
+        self, mock_get_property_status, mock_send_reply, mock_run_scraping
+    ):
+        """Test when user already has access to the property."""
+        mock_get_property_status.return_value = PropertyStatus(
+            exists=True, user_has_access=True, property_id="123"
+        )
+
+        await handle_scraping("reply_token", "test_url", "test_user")
+
+        mock_send_reply.assert_called_once_with(
+            "reply_token",
+            "この物件は既にウォッチリストに追加されています！\n左下のメニューからご確認ください😊",
+        )
+        mock_run_scraping.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_new_property(
+        self, mock_get_property_status, mock_send_reply, mock_run_scraping
+    ):
+        """Test handling a new property."""
+        mock_get_property_status.return_value = PropertyStatus(
+            exists=False, user_has_access=False
+        )
+
+        await handle_scraping("reply_token", "test_url", "test_user")
+
+        mock_send_reply.assert_called_once_with(
+            "reply_token",
+            "ウォッチリストに追加されました！\n左下のメニューからご確認ください😊\n(反映には1分ほどかかる場合があります)",
+        )
+        mock_run_scraping.assert_called_once_with("test_url", "test_user")
+
+    @pytest.mark.asyncio
+    async def test_error_handling(
+        self, mock_get_property_status, mock_send_reply, mock_run_scraping
+    ):
+        """Test error handling in handle_scraping."""
+        # Mock get_property_status to raise an exception
+        mock_get_property_status.side_effect = Exception("Database error")
+
+        # Mock send_push_message
+        with patch(
+            "app.apis.webhooks.send_push_message", autospec=True
+        ) as mock_send_push:
+            mock_send_push.return_value = None
+
+            # Act
+            await handle_scraping("reply_token", "test_url", "test_user")
+
+            # Assert
+            mock_send_push.assert_called_once_with(
+                "test_user",
+                "申し訳ありません。リクエストの処理中にエラーが発生しました。",
+            )
+            mock_run_scraping.assert_not_called()
