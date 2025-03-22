@@ -61,7 +61,20 @@ class WatchlistService:
         Returns:
             UserWatchlist: The enriched property information
         """
-        prop["is_active"] = True
+        # Set default values for required fields
+        # these fields are added now in the property_overview collection
+        prop.update(
+            {
+                "is_active": True,
+                "price": "情報なし",
+                "floor_plan": "情報なし",
+                "completion_time": "情報なし",
+                "area": "情報なし",
+                "other_area": "情報なし",
+                "location": "情報なし",
+                "transportation": ["情報なし"],
+            }
+        )
 
         # Add property overview information
         prop_ov = await self._get_property_overview(prop_id)
@@ -89,6 +102,8 @@ class WatchlistService:
         # Only keep the first image URL if available
         if "image_urls" in prop and prop["image_urls"]:
             prop["image_urls"] = [prop["image_urls"][0]]
+        else:
+            prop["image_urls"] = []
 
         return UserWatchlist(**prop)
 
