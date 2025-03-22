@@ -73,11 +73,12 @@ async def test_seed_database_production_environment(
     mock_env_vars_seed: Dict[str, str],
 ) -> None:
     """Test that seeding is not allowed in production environment."""
-    with patch.dict(os.environ, {"ENV": "production"}, clear=True), patch(
-        "seed.os.getenv", return_value="production"
-    ), patch("seed.ENV", "production"), patch(
-        "motor.motor_asyncio.AsyncIOMotorClient"
-    ) as mock_client:
+    with (
+        patch.dict(os.environ, {"ENV": "production"}, clear=True),
+        patch("seed.os.getenv", return_value="production"),
+        patch("seed.ENV", "production"),
+        patch("motor.motor_asyncio.AsyncIOMotorClient") as mock_client,
+    ):
         with pytest.raises(SystemExit) as exc_info:
             await seed_database()
         assert exc_info.value.code == 1
@@ -199,20 +200,18 @@ async def mock_mongo_client_seed() -> (
         "COLLECTION_USER_PROPERTIES": "user_properties",
     }
 
-    with patch.dict(os.environ, env_vars, clear=True), patch(
-        "seed.os.getenv", side_effect=env_vars.get
-    ), patch("motor.motor_asyncio.AsyncIOMotorClient", return_value=mock_client), patch(
-        "seed.MONGO_URI", env_vars["MONGO_URI"]
-    ), patch(
-        "seed.DB_NAME", env_vars["DB_NAME"]
-    ), patch(
-        "seed.COLLECTION_USERS", env_vars["COLLECTION_USERS"]
-    ), patch(
-        "seed.COLLECTION_PROPERTIES", env_vars["COLLECTION_PROPERTIES"]
-    ), patch(
-        "seed.COLLECTION_USER_PROPERTIES", env_vars["COLLECTION_USER_PROPERTIES"]
-    ), patch(
-        "seed.ENV", env_vars["ENV"]
+    with (
+        patch.dict(os.environ, env_vars, clear=True),
+        patch("seed.os.getenv", side_effect=env_vars.get),
+        patch("motor.motor_asyncio.AsyncIOMotorClient", return_value=mock_client),
+        patch("seed.MONGO_URI", env_vars["MONGO_URI"]),
+        patch("seed.DB_NAME", env_vars["DB_NAME"]),
+        patch("seed.COLLECTION_USERS", env_vars["COLLECTION_USERS"]),
+        patch("seed.COLLECTION_PROPERTIES", env_vars["COLLECTION_PROPERTIES"]),
+        patch(
+            "seed.COLLECTION_USER_PROPERTIES", env_vars["COLLECTION_USER_PROPERTIES"]
+        ),
+        patch("seed.ENV", env_vars["ENV"]),
     ):
         yield mock_client, mock_collections
 
