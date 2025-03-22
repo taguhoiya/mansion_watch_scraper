@@ -73,8 +73,25 @@ class WatchlistService:
             prop (dict): The base property information
 
         Returns:
-            UserWatchlist | None: The enriched property information, or None if required data is missing
+            UserWatchlist: The enriched property information
         """
+        # Set default values for required fields if they don't exist
+        defaults = {
+            "is_active": True,
+            "price": "情報なし",
+            "floor_plan": "情報なし",
+            "completion_time": "情報なし",
+            "area": "情報なし",
+            "other_area": "情報なし",
+            "location": "情報なし",
+            "transportation": ["情報なし"],
+        }
+
+        # Only update missing fields with defaults
+        for key, value in defaults.items():
+            if key not in prop:
+                prop[key] = value
+
         # Add property overview information
         prop_ov = await self._get_property_overview(prop_id)
         if not prop_ov:
@@ -116,6 +133,8 @@ class WatchlistService:
         # Only keep the first image URL if available
         if "image_urls" in prop and prop["image_urls"]:
             prop["image_urls"] = [prop["image_urls"][0]]
+        else:
+            prop["image_urls"] = []
 
         try:
             return UserWatchlist(**prop)

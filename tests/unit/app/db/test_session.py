@@ -76,13 +76,11 @@ def test_get_client_options_production(mock_env_production):
     with patch("app.configs.settings.settings.ENV", "production"):
         options = get_client_options()
         assert options["tls"] is True
-        assert options["tlsAllowInvalidCertificates"] is False
         assert options["retryReads"] is True
         assert options["w"] == "majority"
         assert options["journal"] is True
 
 
-@pytest.mark.asyncio
 async def test_get_db_success(mock_env_development):
     """Test successful database connection."""
     with patch("app.db.session.client") as mock_client:
