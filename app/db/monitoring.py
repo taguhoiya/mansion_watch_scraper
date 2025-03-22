@@ -6,38 +6,45 @@ from time import perf_counter
 from typing import Any, Callable, Dict
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from pymongo.monitoring import CommandListener
+from pymongo.monitoring import (
+    CommandFailedEvent,
+    CommandListener,
+    CommandStartedEvent,
+    CommandSucceededEvent,
+)
 
 logger = logging.getLogger(__name__)
 
-# Define constants
-SLOW_QUERY_THRESHOLD_MS = 100  # Threshold for slow query detection in milliseconds
+# Increase threshold for what's considered a "slow" operation
+SLOW_QUERY_MS = 500  # Increased from default to reduce noise from auth operations
 
 
 class PerformanceCommandListener(CommandListener):
-    """MongoDB command listener for performance monitoring."""
+    """MongoDB command listener for monitoring performance."""
 
-    def started(self, event):
-        """Handle command started event."""
+    def started(self, event: CommandStartedEvent) -> None:
+        """Handle the start of a command."""
         logger.info(
             f"Command {event.command_name} started on database {event.database_name}"
         )
 
-    def succeeded(self, event):
-        """Handle command succeeded event."""
-        duration_ms = event.duration_micros / 1000  # Convert to milliseconds
-        if duration_ms > SLOW_QUERY_THRESHOLD_MS:
+    def succeeded(self, event: CommandSucceededEvent) -> None:
+        """Handle a successful command."""
+        duration_ms = event.duration_micros / 1000
+        if duration_ms > SLOW_QUERY_MS:
             logger.warning(
                 f"Slow query detected: {event.command_name} took {duration_ms:.2f}ms"
             )
-        else:
-            logger.info(
-                f"Command {event.command_name} completed in {duration_ms:.2f}ms"
-            )
 
-    def failed(self, event):
-        """Handle command failed event."""
-        logger.error(f"Command {event.command_name} failed with error: {event.failure}")
+    def failed(self, event: CommandFailedEvent) -> None:
+        """Handle a failed command."""
+        try:
+            duration_ms = float(getattr(event, "duration_micros", 0)) / 1000
+            logger.error(
+                f"Command {event.command_name} failed in {duration_ms:.2f}ms: {str(event.failure)}"
+            )
+        except Exception:
+            logger.error(f"Command {event.command_name} failed: {str(event.failure)}")
 
 
 def monitor_performance(func: Callable) -> Callable:
