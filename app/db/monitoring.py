@@ -24,6 +24,10 @@ class PerformanceCommandListener(CommandListener):
 
     def started(self, event: CommandStartedEvent) -> None:
         """Handle the start of a command."""
+        # Skip logging for SASL authentication commands
+        if event.command_name.startswith("sasl"):
+            return
+
         logger.info(
             f"Command {event.command_name} started on database {event.database_name}"
         )

@@ -92,43 +92,38 @@ class WatchlistService:
             if key not in prop:
                 prop[key] = value
 
-        # Add property overview information
+        # Add property overview information if available
         prop_ov = await self._get_property_overview(prop_id)
-        if not prop_ov:
+        if prop_ov:
+            prop.update(
+                {
+                    "price": prop_ov["price"],
+                    "floor_plan": prop_ov["floor_plan"],
+                    "completion_time": prop_ov["completion_time"],
+                    "area": prop_ov["area"],
+                    "other_area": prop_ov["other_area"],
+                }
+            )
+        else:
             logger.warning(
-                "Property overview not found for property %s, skipping",
+                "Property overview not found for property %s, using defaults",
                 prop_id,
             )
-            return None
 
-        # Add common overview information
+        # Add common overview information if available
         common_ov = await self._get_common_overview(prop_id)
-        if not common_ov:
+        if common_ov:
+            prop.update(
+                {
+                    "location": common_ov["location"],
+                    "transportation": common_ov["transportation"],
+                }
+            )
+        else:
             logger.warning(
-                "Common overview not found for property %s, skipping",
+                "Common overview not found for property %s, using defaults",
                 prop_id,
             )
-            return None
-
-        # Update with property overview data
-        prop.update(
-            {
-                "is_active": True,
-                "price": prop_ov["price"],
-                "floor_plan": prop_ov["floor_plan"],
-                "completion_time": prop_ov["completion_time"],
-                "area": prop_ov["area"],
-                "other_area": prop_ov["other_area"],
-            }
-        )
-
-        # Update with common overview data
-        prop.update(
-            {
-                "location": common_ov["location"],
-                "transportation": common_ov["transportation"],
-            }
-        )
 
         # Only keep the first image URL if available
         if "image_urls" in prop and prop["image_urls"]:
