@@ -74,13 +74,13 @@ async def get_existing_indexes(
         Exception: If there is an error listing indexes.
     """
     try:
+        cursor = await collection.list_indexes()
         existing_indexes = []
-        cursor = collection.list_indexes()
         async for index in cursor:
             existing_indexes.append(index)
         return existing_indexes
     except Exception as e:
-        logger.error(f"Error listing indexes: {e}")
+        logger.error(f"Error listing indexes: {str(e)}")
         raise
 
 

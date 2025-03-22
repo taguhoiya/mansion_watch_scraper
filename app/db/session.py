@@ -1,78 +1,78 @@
 """MongoDB session management module."""
 
-import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
-import certifi
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pymongo.monitoring import register
 from pymongo.server_api import ServerApi
 
+from app.configs.settings import settings
 from app.db.monitoring import PerformanceCommandListener
 
 # Register performance monitoring listener
 register(PerformanceCommandListener())
 
+# Global client instance
+client: Optional[AsyncIOMotorClient] = None
+
 
 def get_client_options() -> Dict[str, Any]:
-    """Get MongoDB client options.
-
-    Returns:
-        Dict[str, Any]: MongoDB client options
-    """
-    is_production = os.getenv("ENV") != "development" and os.getenv("ENV") != "docker"
-
+    """Get MongoDB client options based on environment."""
     options = {
         "server_api": ServerApi("1"),
         "retryWrites": True,
-        "maxPoolSize": int(os.getenv("MONGO_MAX_POOL_SIZE", "100")),
-        "minPoolSize": int(os.getenv("MONGO_MIN_POOL_SIZE", "10")),
-        "maxIdleTimeMS": int(os.getenv("MONGO_MAX_IDLE_TIME_MS", "30000")),
+        "maxPoolSize": settings.MONGO_MAX_POOL_SIZE,
+        "minPoolSize": settings.MONGO_MIN_POOL_SIZE,
+        "maxIdleTimeMS": settings.MONGO_MAX_IDLE_TIME_MS,
         "serverSelectionTimeoutMS": 30000,  # Increased timeout for server selection
-        "connectTimeoutMS": int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "20000")),
-        "waitQueueTimeoutMS": int(os.getenv("MONGO_WAIT_QUEUE_TIMEOUT_MS", "10000")),
+        "connectTimeoutMS": settings.MONGO_CONNECT_TIMEOUT_MS,
+        "waitQueueTimeoutMS": settings.MONGO_WAIT_QUEUE_TIMEOUT_MS,
         "heartbeatFrequencyMS": 10000,  # More frequent server checks
         "localThresholdMS": 15,  # Smaller threshold for selecting nearest server
     }
 
-    if is_production:
+    if settings.ENV not in ["development", "docker"]:
         options.update(
             {
                 "tls": True,
-                "tlsCAFile": os.getenv("MONGO_CA_FILE", certifi.where()),
+                "tlsAllowInvalidCertificates": False,
                 "retryReads": True,
-                "w": "majority",  # Write concern for better consistency
-                "readPreference": "primaryPreferred",  # Read from primary when available
+                "w": "majority",
+                "journal": True,
             }
         )
 
     return options
 
 
-async def get_db() -> AsyncIOMotorDatabase:
+def get_client() -> AsyncIOMotorClient:
+    """Get MongoDB client instance."""
+    global client
+    if client is None:
+        client = AsyncIOMotorClient(settings.MONGO_URI, **get_client_options())
+    return client
+
+
+def get_db(database_name: str = None) -> AsyncIOMotorDatabase:
     """Get MongoDB database instance.
 
-    Returns:
-        AsyncIOMotorDatabase: MongoDB database instance
-    """
-    client = AsyncIOMotorClient(os.getenv("MONGO_URI"), **get_client_options())
-    return client[os.getenv("MONGO_DATABASE", "mansion_watch")]
-
-
-async def init_db() -> AsyncIOMotorDatabase:
-    """Initialize database connection and verify connectivity.
+    Args:
+        database_name: The name of the database to connect to.
+            If None, uses the default database from settings.
 
     Returns:
-        AsyncIOMotorDatabase: The initialized database instance.
-
-    Raises:
-        Exception: If database connection fails.
+        AsyncIOMotorDatabase: The database instance.
     """
+    if database_name is None:
+        database_name = settings.MONGO_DATABASE
+    return get_client()[database_name]
+
+
+async def init_db() -> None:
+    """Initialize database connection."""
+    db = get_db()
     try:
-        client = AsyncIOMotorClient(os.getenv("MONGO_URI"), **get_client_options())
-        db = client[os.getenv("MONGO_DATABASE", "mansion_watch")]
         # Verify database connection
-        await client.admin.command("ping")
-        return db
+        await db.command("ping")
     except Exception as e:
-        raise Exception(f"Failed to initialize database: {str(e)}")
+        raise Exception(f"Failed to connect to MongoDB: {e}")
