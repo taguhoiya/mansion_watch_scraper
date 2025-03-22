@@ -71,9 +71,15 @@ class TestMainApplication:
     def test_cors_middleware(self, test_app):
         """Test CORS middleware configuration."""
         client = TestClient(test_app)
-        response = client.get("/", headers={"Origin": "http://example.com"})
+        response = client.get(
+            "/", headers={"Origin": "https://mansionwatchweb.vercel.app"}
+        )
         assert response.status_code == 200
-        assert response.headers["access-control-allow-origin"] == "*"
+        assert (
+            response.headers["access-control-allow-origin"]
+            == "https://mansionwatchweb.vercel.app"
+        )
+        assert response.headers["access-control-allow-credentials"] == "true"
 
     def test_request_logging(self, caplog, test_app):
         """Test request logging middleware."""

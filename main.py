@@ -10,13 +10,12 @@ import uvicorn
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from motor.motor_asyncio import AsyncIOMotorClient
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 from app.apis import api_router
 from app.configs.settings import LOGGING_CONFIG
 from app.db.indexes import ensure_indexes
-from app.db.session import get_client_options
+from app.db.session import get_client, init_db
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +32,10 @@ async def lifespan(app: FastAPI):
     """
     # Startup
     try:
-        app.mongodb_client = AsyncIOMotorClient(
-            os.getenv("MONGO_URI"), **get_client_options()
-        )
+        # Initialize MongoDB connection with retry logic
+        await init_db()
+        app.mongodb_client = get_client()
         app.mongodb = app.mongodb_client[os.getenv("MONGO_DATABASE", "mansion_watch")]
-        await app.mongodb.command("ping")
         logger.info("Connected to MongoDB")
         await ensure_indexes(app.mongodb)
         yield
@@ -45,9 +43,10 @@ async def lifespan(app: FastAPI):
         logger.error("Failed to initialize MongoDB: %s", e)
         raise
     finally:
-        # Shutdown
-        logger.info("Closing MongoDB connection")
-        app.mongodb_client.close()
+        # Shutdown - only close if we successfully created the client
+        if hasattr(app, "mongodb_client"):
+            logger.info("Closing MongoDB connection")
+            app.mongodb_client.close()
 
 
 def create_app() -> FastAPI:
@@ -67,11 +66,10 @@ def create_app() -> FastAPI:
     # Add CORS middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=False,
-        allow_methods=["*"],
+        allow_origins=["https://mansionwatchweb.vercel.app", "http://localhost:3000"],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["*"],
-        allow_origin_regex=None,
         expose_headers=["*"],
         max_age=600,
     )
@@ -92,17 +90,26 @@ def create_app() -> FastAPI:
                 The response from the next middleware or endpoint.
             """
             start_time = time.time()
-            response = await call_next(request)
-            process_time = time.time() - start_time
-            logger.info(
-                "Method: %s Path: %s Status: %d Time: %.3fs",
-                request.method,
-                request.url.path,
-                response.status_code,
-                process_time,
-            )
-            response.headers["X-Process-Time"] = str(process_time)
-            return response
+            try:
+                response = await call_next(request)
+                process_time = time.time() - start_time
+                logger.info(
+                    "Method: %s Path: %s Status: %d Time: %.3fs",
+                    request.method,
+                    request.url.path,
+                    response.status_code,
+                    process_time,
+                )
+                response.headers["X-Process-Time"] = str(process_time)
+                return response
+            except Exception as e:
+                logger.error(
+                    "Error processing request: Method: %s Path: %s Error: %s",
+                    request.method,
+                    request.url.path,
+                    str(e),
+                )
+                raise
 
     app.add_middleware(RequestLoggingMiddleware)
 
@@ -119,7 +126,7 @@ def create_app() -> FastAPI:
         return {"message": "Welcome to Mansion Watch API"}
 
     @app.get("/health")
-    async def health_check() -> Dict[str, Any]:  # noqa: F811
+    async def health_check() -> Dict[str, Any]:
         """Health check endpoint.
 
         Returns:
@@ -135,7 +142,8 @@ def create_app() -> FastAPI:
                 },
             )
         try:
-            await app.mongodb.command("ping")
+            # Test database connection with timeout
+            await app.mongodb.command("ping", maxTimeMS=5000)
             return {
                 "status": "healthy",
                 "database": "connected",
