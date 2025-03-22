@@ -16,14 +16,24 @@ with patch("motor.motor_asyncio.AsyncIOMotorClient"):
 @pytest.fixture
 def mock_env_development():
     """Fixture to mock development environment variables."""
-    with patch.dict(os.environ, {"ENV": "development", "MONGO_DATABASE": "test_db"}):
+    env_vars = {
+        "ENV": "development",
+        "MONGO_DATABASE": "test_db",
+        "MONGO_URI": "mongodb://localhost:27017",
+    }
+    with patch.dict(os.environ, env_vars, clear=True):
         yield
 
 
 @pytest.fixture
 def mock_env_production():
     """Fixture to mock production environment variables."""
-    with patch.dict(os.environ, {"ENV": "production", "MONGO_DATABASE": "test_db"}):
+    env_vars = {
+        "ENV": "production",
+        "MONGO_DATABASE": "test_db",
+        "MONGO_URI": "mongodb+srv://user:pass@cluster.mongodb.net/",
+    }
+    with patch.dict(os.environ, env_vars, clear=True):
         yield
 
 
@@ -80,7 +90,7 @@ async def test_get_db_success(mock_env_development):
 @pytest.mark.asyncio
 async def test_get_db_missing_database():
     """Test database connection with missing database name."""
-    with patch.dict(os.environ, {"MONGO_DATABASE": ""}):
+    with patch.dict(os.environ, {"MONGO_DATABASE": ""}, clear=True):
         with pytest.raises(ValueError) as exc_info:
             get_db()
         assert str(exc_info.value) == "MONGO_DATABASE environment variable is not set"
