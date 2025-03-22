@@ -6,6 +6,7 @@ pre-commit
 scrapyd
 scrapyd-client
 pymongo
+certifi
 fastapi
 uvicorn
 pydantic
