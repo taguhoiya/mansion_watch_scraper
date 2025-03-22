@@ -20,6 +20,7 @@ env:
   COLLECTION_PROPERTY_OVERVIEWS: property_overviews
   COLLECTION_COMMON_OVERVIEWS: common_overviews
   COLLECTION_PROPERTY_IMAGES: property_images
+  COLLECTION_USERS: users
   IMAGES_STORE: tmp/images
   GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   GCP_BUCKET_NAME: ${{ secrets.GCP_BUCKET_NAME }}
@@ -28,6 +29,7 @@ env:
   LOG_LEVEL: DEBUG
   LINE_CHANNEL_SECRET: ${{ secrets.LINE_CHANNEL_SECRET }}
   LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+  GOOGLE_APPLICATION_CREDENTIALS: service-account.json
 
 jobs:
   unit-tests:
@@ -43,6 +45,10 @@ jobs:
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
+
+      - name: Create mock service account file
+        run: |
+          echo '{"type": "service_account"}' > service-account.json
 
       - name: Sort imports
         run: isort .
