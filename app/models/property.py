@@ -41,6 +41,11 @@ class Property(BaseModel):
             raise ValueError("updated_at must be equal to or later than created_at")
         return model
 
+    def model_dump(self, *args, **kwargs):
+        """Override model_dump to exclude id field."""
+        kwargs["exclude"] = {"id", "_id", *kwargs.get("exclude", set())}
+        return super().model_dump(*args, **kwargs)
+
     model_config = {
         "populate_by_name": True,
         "arbitrary_types_allowed": True,

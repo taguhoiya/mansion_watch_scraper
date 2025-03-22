@@ -129,11 +129,19 @@ def download_image(
 def convert_to_dict(obj: Any, collection_name: str) -> Dict[str, Any]:
     """Convert Pydantic model or dictionary to MongoDB-compatible dictionary."""
     if isinstance(obj, Property):
-        return obj.model_dump(exclude={"id"}, by_alias=True)
+        # For Property objects, exclude both id and _id fields
+        result = obj.model_dump(by_alias=True)
+        result.pop("id", None)
+        result.pop("_id", None)
+        return result
     if hasattr(obj, "model_dump"):
         return obj.model_dump(by_alias=True)
     if isinstance(obj, dict):
-        return obj
+        # For dictionaries, also remove id fields
+        result = obj.copy()
+        result.pop("id", None)
+        result.pop("_id", None)
+        return result
 
     logger.error(f"Unexpected object type in {collection_name}: {type(obj)}")
     return {}
@@ -160,15 +168,17 @@ def process_property(
         return None
 
     property_dict = convert_to_dict(item[PROPERTIES], "properties")
-    if "_id" in property_dict and property_dict["_id"] is None:
-        property_dict.pop("_id")
+
+    # Remove any id fields (should already be removed by convert_to_dict)
+    property_dict.pop("id", None)
+    property_dict.pop("_id", None)
 
     query = {"url": property_dict["url"]}
     existing = db[PROPERTIES].find_one(query)
 
     if existing is not None:
         property_dict = {
-            k: v for k, v in property_dict.items() if k not in ["_id", "created_at"]
+            k: v for k, v in property_dict.items() if k not in ["created_at"]
         }
         db[PROPERTIES].update_one(query, {"$set": property_dict})
         return existing["_id"]
@@ -565,8 +575,11 @@ class SuumoImagesPipeline(ImagesPipeline):
 
         if processed_urls:
             item["image_urls"] = processed_urls
-            if "properties" in item:
-                item["properties"].image_urls = processed_urls
+            properties = item.get("properties")
+            if isinstance(properties, Property):
+                properties.image_urls = processed_urls
+            elif properties is not None:
+                item["properties"]["image_urls"] = processed_urls
 
         return item
 
@@ -607,54 +620,35 @@ class SuumoImagesPipeline(ImagesPipeline):
             self.logger.error(f"Error cleaning up temporary directory: {e}")
             return False
 
-    def item_completed(
-        self, results: List[tuple[bool, dict]], item: Dict[str, Any], info
-    ) -> Dict[str, Any]:
-        """Handle completed item processing."""
-        properties = item.get(PROPERTIES)
-        if not properties:
+    def item_completed(self, results, item, info):
+        """Process completed downloads."""
+        if not results:
             return item
 
-        original_image_urls = (
-            properties.image_urls if hasattr(properties, "image_urls") else []
-        )
-        if not original_image_urls:
-            return item
+        # Count failed downloads
+        failed_downloads = len([r for r, i in results if not r])
+        if failed_downloads > 0:
+            self.logger.warning(f"Failed to download {failed_downloads} images")
 
-        successful_results = [(ok, res) for ok, res in results if ok]
-        failed_downloads = [(ok, res) for ok, res in results if not ok]
+        # Process successful downloads
+        successful_downloads = [
+            result[1] for result in results if result[0] and isinstance(result[1], dict)
+        ]
 
-        if failed_downloads:
-            self.logger.warning(f"Failed to download {len(failed_downloads)} images")
+        # Process successful downloads and get GCS URLs
+        gcs_urls = self._process_successful_downloads(successful_downloads)
 
-        property_id = properties._id if hasattr(properties, "_id") else None
-        gcs_image_urls = self._get_cached_urls(original_image_urls)
-
-        if successful_results:
-            image_paths = [res["path"] for _, res in successful_results]
-            new_gcs_urls = self._process_successful_downloads(image_paths, property_id)
-            gcs_image_urls.extend(new_gcs_urls)
-
-        if hasattr(properties, "image_urls"):
-            properties.image_urls = gcs_image_urls
+        # Update the item with GCS URLs
+        properties = item.get("properties")
+        if isinstance(properties, Property):
+            properties.image_urls = gcs_urls
+        else:
+            item["properties"]["image_urls"] = gcs_urls
 
         return item
 
-    def _get_cached_urls(self, original_urls: List[str]) -> List[str]:
-        """Get cached GCS URLs for original image URLs."""
-        return [
-            self.image_url_to_gcs_url[url]
-            for url in original_urls
-            if url in self.image_url_to_gcs_url
-        ]
-
-    def _process_successful_downloads(
-        self, image_paths: List[str], property_id: Optional[ObjectId]
-    ) -> List[str]:
+    def _process_successful_downloads(self, image_paths: List[str]) -> List[str]:
         """Process successful downloads and upload to GCS."""
-        if not (self.bucket and self.folder_name):
-            return []
-
         gcs_image_urls = []
         for path in image_paths:
             url = self._upload_image_to_gcs(path)
@@ -667,3 +661,20 @@ class SuumoImagesPipeline(ImagesPipeline):
             )
 
         return gcs_image_urls
+
+    def _upload_image_to_gcs(self, image_path: str) -> Optional[str]:
+        """Upload an image to Google Cloud Storage."""
+        try:
+            filename = os.path.basename(image_path)
+            blob_name = f"{self.folder_name}/{filename}"
+
+            # Check if image already exists in GCS
+            if check_blob_exists(self.bucket, blob_name):
+                return f"https://storage.googleapis.com/{self.bucket_name}/{blob_name}"
+
+            blob = self.bucket.blob(blob_name)
+            blob.upload_from_filename(image_path)
+            return f"https://storage.googleapis.com/{self.bucket_name}/{blob_name}"
+        except Exception as e:
+            self.logger.error(f"Error uploading image to GCS: {str(e)}")
+            return None
