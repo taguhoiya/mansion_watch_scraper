@@ -1,46 +1,78 @@
-import os
+"""MongoDB session management module."""
 
-import certifi
-from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo.database import Database
+from typing import Any, Dict, Optional
+
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+from pymongo.monitoring import register
 from pymongo.server_api import ServerApi
 
+from app.configs.settings import settings
+from app.db.monitoring import PerformanceCommandListener
 
-def get_client_options():
+# Register performance monitoring listener
+register(PerformanceCommandListener())
+
+# Global client instance
+client: Optional[AsyncIOMotorClient] = None
+
+
+def get_client_options() -> Dict[str, Any]:
     """Get MongoDB client options based on environment."""
-    is_production = os.getenv("ENV") != "development" and os.getenv("ENV") != "docker"
-
     options = {
         "server_api": ServerApi("1"),
+        "retryWrites": True,
+        "maxPoolSize": settings.MONGO_MAX_POOL_SIZE,
+        "minPoolSize": settings.MONGO_MIN_POOL_SIZE,
+        "maxIdleTimeMS": settings.MONGO_MAX_IDLE_TIME_MS,
+        "serverSelectionTimeoutMS": 30000,  # Increased timeout for server selection
+        "connectTimeoutMS": settings.MONGO_CONNECT_TIMEOUT_MS,
+        "waitQueueTimeoutMS": settings.MONGO_WAIT_QUEUE_TIMEOUT_MS,
+        "heartbeatFrequencyMS": 10000,  # More frequent server checks
+        "localThresholdMS": 15,  # Smaller threshold for selecting nearest server
     }
 
-    if is_production:
+    if settings.ENV not in ["development", "docker"]:
         options.update(
             {
                 "tls": True,
-                "tlsCAFile": certifi.where(),
-                "retryWrites": True,
+                "tlsAllowInvalidCertificates": False,
+                "retryReads": True,
                 "w": "majority",
-                "appName": "MansionWatch",
+                "journal": True,
             }
         )
 
     return options
 
 
-# Initialize MongoDB client with appropriate options
-client = AsyncIOMotorClient(os.getenv("MONGO_URI"), **get_client_options())
+def get_client() -> AsyncIOMotorClient:
+    """Get MongoDB client instance."""
+    global client
+    if client is None:
+        client = AsyncIOMotorClient(settings.MONGO_URI, **get_client_options())
+    return client
 
 
-def get_db() -> Database:
-    """Get the database instance.
+def get_db(database_name: str = None) -> AsyncIOMotorDatabase:
+    """Get MongoDB database instance.
+
+    Args:
+        database_name: The name of the database to connect to.
+            If None, uses the default database from settings.
 
     Returns:
-        Database: The database instance.
+        AsyncIOMotorDatabase: The database instance.
     """
-    db_name = os.getenv("MONGO_DATABASE", "mansionwatch")
-    if not db_name:
-        raise ValueError("MONGO_DATABASE environment variable is not set")
+    if database_name is None:
+        database_name = settings.MONGO_DATABASE
+    return get_client()[database_name]
 
-    db: Database = client[db_name]
-    return db
+
+async def init_db() -> None:
+    """Initialize database connection."""
+    db = get_db()
+    try:
+        # Verify database connection
+        await db.command("ping")
+    except Exception as e:
+        raise Exception(f"Failed to connect to MongoDB: {e}")

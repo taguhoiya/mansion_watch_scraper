@@ -2,10 +2,10 @@ import os
 import sys
 from unittest.mock import MagicMock, patch
 
-import certifi
 import pytest
 from pymongo.server_api import ServerApi
 
+from app.configs.settings import settings
 from app.db.session import get_client_options
 
 # We need to patch the client before importing get_db to properly test it
@@ -36,14 +36,9 @@ def mock_env_development(clean_env):
 
 
 @pytest.fixture
-def mock_env_production(clean_env):
-    """Fixture to mock production environment variables."""
-    env_vars = {
-        "ENV": "production",
-        "MONGO_DATABASE": "test_db",
-        "MONGO_URI": "mongodb+srv://user:pass@cluster.mongodb.net/",
-    }
-    with patch.dict(os.environ, env_vars):
+def mock_env_production():
+    """Mock production environment."""
+    with patch("app.configs.settings.settings.ENV", "production"):
         yield
 
 
@@ -76,21 +71,13 @@ def test_get_client_options_development(mock_env_development):
 
 def test_get_client_options_production(mock_env_production):
     """Test client options in production environment."""
-    options = get_client_options()
-
-    # Check all production options
-    assert options["tls"] is True
-    assert options["tlsCAFile"] == certifi.where()
-    assert options["w"] == "majority"
-    assert options.get("journal", False) in [
-        True,
-        False,
-    ]  # Should be boolean if present
-    assert options["appName"] == "MansionWatch"
-
-    # Check base options are still present
-    assert isinstance(options["server_api"], ServerApi)
-    assert isinstance(options["server_api"].version, str)
+    with patch("app.configs.settings.settings.ENV", "production"):
+        options = get_client_options()
+        assert options["tls"] is True
+        assert options["tlsAllowInvalidCertificates"] is False
+        assert options["retryReads"] is True
+        assert options["w"] == "majority"
+        assert options["journal"] is True
 
 
 @pytest.mark.asyncio
@@ -101,10 +88,19 @@ async def test_get_db_success(mock_env_development):
         mock_db = MagicMock()
         mock_client.__getitem__.return_value = mock_db
 
-        # Test get_db
-        db = get_db()
+        # Test get_db with custom database name
+        db = get_db("test_db")
         assert db == mock_db
         mock_client.__getitem__.assert_called_once_with("test_db")
+
+        # Reset mock
+        mock_client.__getitem__.reset_mock()
+
+        # Test get_db with default database name
+        with patch("app.configs.settings.settings.MONGO_DATABASE", "default_db"):
+            db = get_db()
+            assert db == mock_db
+            mock_client.__getitem__.assert_called_once_with("default_db")
 
 
 @pytest.mark.asyncio
@@ -131,7 +127,7 @@ async def test_get_db_default_database():
             # Test get_db uses default database name
             db = get_db()
             assert db == mock_db
-            mock_client.__getitem__.assert_called_once_with("mansionwatch")
+            mock_client.__getitem__.assert_called_once_with("mansion_watch")
 
 
 def test_client_singleton():
@@ -143,11 +139,27 @@ def test_client_singleton():
                 del sys.modules["app.db.session"]
 
             # Import the module twice to test singleton behavior
-            from app.db.session import client as client1
-            from app.db.session import client as client2
+            from app.db.session import get_client
 
-            # Both imports should reference the same client instance
+            # Get client twice
+            client1 = get_client()
+            client2 = get_client()
+
+            # Both calls should reference the same client instance
             assert client1 is client2
 
             # Client should only be created once
             mock_client.assert_called_once()
+            args, kwargs = mock_client.call_args
+            assert args[0] == settings.MONGO_URI
+            assert isinstance(kwargs["server_api"], ServerApi)
+            assert kwargs["server_api"].version == "1"
+            assert kwargs["retryWrites"] is True
+            assert kwargs["maxPoolSize"] == settings.MONGO_MAX_POOL_SIZE
+            assert kwargs["minPoolSize"] == settings.MONGO_MIN_POOL_SIZE
+            assert kwargs["maxIdleTimeMS"] == settings.MONGO_MAX_IDLE_TIME_MS
+            assert kwargs["serverSelectionTimeoutMS"] == 30000
+            assert kwargs["connectTimeoutMS"] == settings.MONGO_CONNECT_TIMEOUT_MS
+            assert kwargs["waitQueueTimeoutMS"] == settings.MONGO_WAIT_QUEUE_TIMEOUT_MS
+            assert kwargs["heartbeatFrequencyMS"] == 10000
+            assert kwargs["localThresholdMS"] == 15
