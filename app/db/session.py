@@ -1,11 +1,35 @@
 import os
 
+import certifi
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.database import Database
 from pymongo.server_api import ServerApi
 
-# TODO: Use certifi to verify the SSL certificate
-client = AsyncIOMotorClient(os.getenv("MONGO_URI"), server_api=ServerApi("1"))
+
+def get_client_options():
+    """Get MongoDB client options based on environment."""
+    is_production = os.getenv("ENV") != "development" and os.getenv("ENV") != "docker"
+
+    options = {
+        "server_api": ServerApi("1"),
+    }
+
+    if is_production:
+        options.update(
+            {
+                "tls": True,
+                "tlsCAFile": certifi.where(),
+                "retryWrites": True,
+                "w": "majority",
+                "appName": "MansionWatch",
+            }
+        )
+
+    return options
+
+
+# Initialize MongoDB client with appropriate options
+client = AsyncIOMotorClient(os.getenv("MONGO_URI"), **get_client_options())
 
 
 def get_db() -> Database:
