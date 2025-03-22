@@ -1,10 +1,9 @@
 """MongoDB session management module."""
 
 import logging
-import os
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
-from motor.motor_asyncio import AsyncIOMotorClient
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pymongo.monitoring import register
 from pymongo.server_api import ServerApi
 
@@ -16,8 +15,11 @@ logger = logging.getLogger(__name__)
 # Register performance monitoring listener
 register(PerformanceCommandListener())
 
+# Global client instance
+client: Optional[AsyncIOMotorClient] = None
 
-def get_client_options() -> Dict:
+
+def get_client_options() -> Dict[str, Any]:
     """Get MongoDB client options based on environment.
 
     Returns:
@@ -38,48 +40,23 @@ def get_client_options() -> Dict:
     }
 
     # Enable TLS and other security settings for MongoDB Atlas or production environments
-    if settings.ENV not in ["development", "docker"]:
+    if "mongodb+srv" in settings.MONGO_URI or settings.ENV not in [
+        "development",
+        "docker",
+    ]:
         options.update(
             {
                 "tls": True,
-                "tlsAllowInvalidCertificates": False,  # Enforce certificate validation
-                "tlsInsecure": False,  # Don't skip certificate validation
                 "tlsCAFile": "isrgrootx1.pem",  # Let's Encrypt Root CA
+                "tlsMinVersion": "TLSv1.2",  # Ensure minimum TLS 1.2 for Atlas compatibility
                 "retryReads": True,
-                "w": "majority",  # Write concern
-                "journal": True,  # Wait for journal commit
+                "w": "majority",
+                "journal": True,
                 "readPreference": "primaryPreferred",
             }
         )
 
     return options
-
-
-# Global client instance
-client: Optional[AsyncIOMotorClient] = None
-
-
-def get_db() -> AsyncIOMotorClient:
-    """Get MongoDB database instance.
-
-    Returns:
-        AsyncIOMotorClient instance.
-    """
-    global client
-    if not client:
-        uri = os.getenv("MONGODB_URI", settings.MONGO_URI)
-        if not uri:
-            raise ValueError("MONGODB_URI environment variable not set")
-
-        try:
-            options = get_client_options()
-            client = AsyncIOMotorClient(uri, **options)
-            return client[settings.MONGO_DATABASE]
-        except Exception as e:
-            logger.error("Failed to connect to MongoDB: %s", str(e))
-            raise
-
-    return client[settings.MONGO_DATABASE]
 
 
 def get_client() -> AsyncIOMotorClient:
@@ -89,27 +66,26 @@ def get_client() -> AsyncIOMotorClient:
         AsyncIOMotorClient instance.
     """
     global client
-    if not client:
-        uri = os.getenv("MONGODB_URI", settings.MONGO_URI)
-        if not uri:
-            raise ValueError("MONGODB_URI environment variable not set")
-
-        try:
-            options = get_client_options()
-            client = AsyncIOMotorClient(uri, **options)
-        except Exception as e:
-            logger.error("Failed to connect to MongoDB: %s", str(e))
-            raise
-
+    if client is None:
+        client = AsyncIOMotorClient(settings.MONGO_URI, **get_client_options())
     return client
+
+
+def get_db() -> AsyncIOMotorDatabase:
+    """Get MongoDB database instance.
+
+    Returns:
+        AsyncIOMotorDatabase: The database instance.
+    """
+    return get_client()[settings.MONGO_DATABASE]
 
 
 async def init_db() -> None:
     """Initialize database connection."""
-    db = get_client()
+    db = get_db()
     try:
         # Verify database connection
-        await db.admin.command("ping")
+        await db.command("ping")
     except Exception as e:
         logger.error("Failed to connect to MongoDB: %s", str(e))
         raise
