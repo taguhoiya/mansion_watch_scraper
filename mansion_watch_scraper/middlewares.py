@@ -191,14 +191,14 @@ class AntiScrapingMiddleware:
         else:
             request.headers.update(self.page_specific_headers)
 
-        # Add random delay between requests (2-6 seconds)
-        time.sleep(random.uniform(2.0, 6.0))
+        # Add shorter random delay (1-3 seconds)
+        time.sleep(random.uniform(1.0, 3.0))
         return None
 
     def process_response(self, request, response, spider):
-        # If we get a 503, add a longer delay before retrying
+        # If we get a 503, add a shorter delay before retrying
         if response.status == 503:
-            time.sleep(random.uniform(10.0, 20.0))
+            time.sleep(random.uniform(5.0, 10.0))
         return response
 
 
