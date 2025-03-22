@@ -48,7 +48,6 @@ def get_client_options() -> Dict[str, Any]:
             {
                 "tls": True,
                 "tlsCAFile": "isrgrootx1.pem",  # Let's Encrypt Root CA
-                "tlsMinVersion": "TLSv1.2",  # Ensure minimum TLS 1.2 for Atlas compatibility
                 "retryReads": True,
                 "w": "majority",
                 "journal": True,
