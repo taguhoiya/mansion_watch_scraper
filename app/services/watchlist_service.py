@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import List
 
@@ -8,6 +9,8 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.models.apis.watchlist import UserWatchlist
 from app.models.common_overview import CommonOverview
 from app.models.property_overview import PropertyOverview
+
+logger = logging.getLogger(__name__)
 
 
 class WatchlistService:
@@ -44,13 +47,24 @@ class WatchlistService:
         # Enrich properties with additional information
         enriched_properties = []
         for prop in properties:
-            prop_id = prop["_id"]
-            enriched_prop = await self._enrich_property(prop_id, prop)
-            enriched_properties.append(enriched_prop)
+            try:
+                prop_id = prop["_id"]
+                enriched_prop = await self._enrich_property(prop_id, prop)
+                if enriched_prop:
+                    enriched_properties.append(enriched_prop)
+            except Exception as e:
+                # Log the error but continue processing other properties
+                logger.error(
+                    "Error enriching property %s: %s",
+                    prop_id,
+                    str(e),
+                )
 
         return enriched_properties
 
-    async def _enrich_property(self, prop_id: ObjectId, prop: dict) -> UserWatchlist:
+    async def _enrich_property(
+        self, prop_id: ObjectId, prop: dict
+    ) -> UserWatchlist | None:
         """
         Enrich a property with overview information.
 
@@ -59,38 +73,59 @@ class WatchlistService:
             prop (dict): The base property information
 
         Returns:
-            UserWatchlist: The enriched property information
+            UserWatchlist | None: The enriched property information, or None if required data is missing
         """
-        prop["is_active"] = True
-
         # Add property overview information
         prop_ov = await self._get_property_overview(prop_id)
-        if prop_ov:
-            prop.update(
-                {
-                    "price": prop_ov["price"],
-                    "floor_plan": prop_ov["floor_plan"],
-                    "completion_time": prop_ov["completion_time"],
-                    "area": prop_ov["area"],
-                    "other_area": prop_ov["other_area"],
-                }
+        if not prop_ov:
+            logger.warning(
+                "Property overview not found for property %s, skipping",
+                prop_id,
             )
+            return None
 
         # Add common overview information
         common_ov = await self._get_common_overview(prop_id)
-        if common_ov:
-            prop.update(
-                {
-                    "location": common_ov["location"],
-                    "transportation": common_ov["transportation"],
-                }
+        if not common_ov:
+            logger.warning(
+                "Common overview not found for property %s, skipping",
+                prop_id,
             )
+            return None
+
+        # Update with property overview data
+        prop.update(
+            {
+                "is_active": True,
+                "price": prop_ov["price"],
+                "floor_plan": prop_ov["floor_plan"],
+                "completion_time": prop_ov["completion_time"],
+                "area": prop_ov["area"],
+                "other_area": prop_ov["other_area"],
+            }
+        )
+
+        # Update with common overview data
+        prop.update(
+            {
+                "location": common_ov["location"],
+                "transportation": common_ov["transportation"],
+            }
+        )
 
         # Only keep the first image URL if available
         if "image_urls" in prop and prop["image_urls"]:
             prop["image_urls"] = [prop["image_urls"][0]]
 
-        return UserWatchlist(**prop)
+        try:
+            return UserWatchlist(**prop)
+        except Exception as e:
+            logger.error(
+                "Failed to create watchlist item for property %s: %s",
+                prop_id,
+                str(e),
+            )
+            return None
 
     async def _get_property_overview(
         self, prop_id: ObjectId
