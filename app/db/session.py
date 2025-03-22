@@ -31,7 +31,11 @@ def get_client_options() -> Dict[str, Any]:
         "localThresholdMS": 15,  # Smaller threshold for selecting nearest server
     }
 
-    if settings.ENV not in ["development", "docker"]:
+    # Enable TLS and other security settings for MongoDB Atlas or production environments
+    if "mongodb+srv" in settings.MONGO_URI or settings.ENV not in [
+        "development",
+        "docker",
+    ]:
         options.update(
             {
                 "tls": True,
