@@ -38,8 +38,7 @@ def get_client_options() -> Dict[str, Any]:
     ]:
         options.update(
             {
-                "tls": True,
-                "tlsAllowInvalidCertificates": False,
+                "tls": True,  # Use TLS for connection
                 "retryReads": True,
                 "w": "majority",
                 "journal": True,
