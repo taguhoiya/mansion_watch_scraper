@@ -5,7 +5,7 @@ isort
 pre-commit
 scrapyd
 scrapyd-client
-pymongo
+pymongo[ocsp]>=4.9.0
 certifi
 fastapi
 uvicorn
@@ -15,6 +15,9 @@ motor
 Pillow
 line-bot-sdk
 google-cloud-storage
+pyOpenSSL>=17.2.0
+service_identity>=18.1.0
+cryptography>=2.5
 
 # for local development
 ngrok
