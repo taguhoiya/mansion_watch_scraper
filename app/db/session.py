@@ -24,11 +24,12 @@ def get_client_options() -> Dict[str, Any]:
         "maxPoolSize": settings.MONGO_MAX_POOL_SIZE,
         "minPoolSize": settings.MONGO_MIN_POOL_SIZE,
         "maxIdleTimeMS": settings.MONGO_MAX_IDLE_TIME_MS,
-        "serverSelectionTimeoutMS": 30000,  # Increased timeout for server selection
+        "serverSelectionTimeoutMS": 30000,
         "connectTimeoutMS": settings.MONGO_CONNECT_TIMEOUT_MS,
         "waitQueueTimeoutMS": settings.MONGO_WAIT_QUEUE_TIMEOUT_MS,
-        "heartbeatFrequencyMS": 10000,  # More frequent server checks
-        "localThresholdMS": 15,  # Smaller threshold for selecting nearest server
+        "heartbeatFrequencyMS": 10000,
+        "localThresholdMS": 15,
+        "appName": "mansion_watch",  # Help identify the application in MongoDB logs
     }
 
     # Enable TLS and other security settings for MongoDB Atlas or production environments
@@ -38,11 +39,11 @@ def get_client_options() -> Dict[str, Any]:
     ]:
         options.update(
             {
-                "tls": True,  # Use TLS for connection
-                "tlsInsecure": False,  # Enforce strict TLS verification
+                "tls": True,
                 "retryReads": True,
                 "w": "majority",
                 "journal": True,
+                "readPreference": "primaryPreferred",
             }
         )
 

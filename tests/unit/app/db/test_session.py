@@ -74,7 +74,6 @@ def test_get_client_options_production(mock_env_production):
     with patch("app.configs.settings.settings.ENV", "production"):
         options = get_client_options()
         assert options["tls"] is True
-        assert options["tlsInsecure"] is False
         assert options["retryReads"] is True
         assert options["w"] == "majority"
         assert options["journal"] is True
