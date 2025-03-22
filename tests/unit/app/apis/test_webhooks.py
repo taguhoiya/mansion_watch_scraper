@@ -373,10 +373,13 @@ class TestProcessTextMessage:
             mock_start_scrapy: Mock of the start_scrapy function
         """
         # Given: We need to mock extract_suumo_url and handle_scraping
-        with patch(
-            "app.apis.webhooks.extract_suumo_url",
-            return_value="https://suumo.jp/ms/chuko/tokyo/sc_meguro/nc_75709932/",
-        ), patch("app.apis.webhooks.handle_scraping") as mock_handle_scraping:
+        with (
+            patch(
+                "app.apis.webhooks.extract_suumo_url",
+                return_value="https://suumo.jp/ms/chuko/tokyo/sc_meguro/nc_75709932/",
+            ),
+            patch("app.apis.webhooks.handle_scraping") as mock_handle_scraping,
+        ):
             # Configure the mock
             mock_handle_scraping.return_value = asyncio.Future()
             mock_handle_scraping.return_value.set_result(None)
@@ -465,10 +468,13 @@ class TestProcessTextMessage:
             mock_start_scrapy: Mock of the start_scrapy function
         """
         # Given: We need to mock extract_suumo_url and handle_scraping
-        with patch(
-            "app.apis.webhooks.extract_suumo_url",
-            return_value="https://suumo.jp/ms/chuko/tokyo/sc_meguro/nc_75709932/",
-        ), patch("app.apis.webhooks.handle_scraping") as mock_handle_scraping:
+        with (
+            patch(
+                "app.apis.webhooks.extract_suumo_url",
+                return_value="https://suumo.jp/ms/chuko/tokyo/sc_meguro/nc_75709932/",
+            ),
+            patch("app.apis.webhooks.handle_scraping") as mock_handle_scraping,
+        ):
             # Configure the mock
             mock_handle_scraping.side_effect = Exception("Test exception")
 

@@ -668,13 +668,18 @@ class TestIntegrationScenarios:
         to handling the scraping process.
         """
         # Given: We need to mock the extract_urls and is_valid_property_url functions
-        with patch(
-            "app.apis.webhooks.extract_urls", return_value=["https://suumo.jp/ms/test/"]
-        ) as mock_extract_urls, patch(
-            "app.apis.webhooks.is_valid_property_url", return_value=True
-        ) as mock_is_valid_property_url, patch(
-            "app.apis.webhooks.send_push_message", autospec=True
-        ) as mock_send_push:
+        with (
+            patch(
+                "app.apis.webhooks.extract_urls",
+                return_value=["https://suumo.jp/ms/test/"],
+            ) as mock_extract_urls,
+            patch(
+                "app.apis.webhooks.is_valid_property_url", return_value=True
+            ) as mock_is_valid_property_url,
+            patch(
+                "app.apis.webhooks.send_push_message", autospec=True
+            ) as mock_send_push,
+        ):
             mock_send_push.return_value = None
 
             # When: We process the text message
@@ -722,13 +727,17 @@ class TestIntegrationScenarios:
             "https://suumo.jp/ms/mansion/tokyo/sc_shibuya/",
         ]
 
-        with patch(
-            "app.apis.webhooks.extract_urls", return_value=urls
-        ) as mock_extract_urls, patch(
-            "app.apis.webhooks.is_valid_property_url", return_value=True
-        ) as mock_is_valid, patch(
-            "app.apis.webhooks.handle_scraping", autospec=True
-        ) as mock_handle_scraping:
+        with (
+            patch(
+                "app.apis.webhooks.extract_urls", return_value=urls
+            ) as mock_extract_urls,
+            patch(
+                "app.apis.webhooks.is_valid_property_url", return_value=True
+            ) as mock_is_valid,
+            patch(
+                "app.apis.webhooks.handle_scraping", autospec=True
+            ) as mock_handle_scraping,
+        ):
 
             # Act
             await process_text_message(mock_event_with_multiple_urls)

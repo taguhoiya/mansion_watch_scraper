@@ -733,16 +733,18 @@ def pipeline():
     crawler.settings = settings
 
     # Mock GCP credentials and storage
-    with patch.dict(
-        os.environ,
-        {
-            "GOOGLE_APPLICATION_CREDENTIALS": "service-account.json",
-            "GCP_PROJECT_ID": "test-project",
-            "GCS_IMAGE_QUALITY": "30",
-        },
-    ), patch("os.path.exists", return_value=True), patch(
-        "google.cloud.storage.Client"
-    ) as mock_gcs_client:
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "GOOGLE_APPLICATION_CREDENTIALS": "service-account.json",
+                "GCP_PROJECT_ID": "test-project",
+                "GCS_IMAGE_QUALITY": "30",
+            },
+        ),
+        patch("os.path.exists", return_value=True),
+        patch("google.cloud.storage.Client") as mock_gcs_client,
+    ):
         mock_bucket = Mock()
         mock_bucket.exists.return_value = True
         mock_gcs_client.return_value.bucket.return_value = mock_bucket
@@ -863,27 +865,32 @@ class TestSuumoImagesPipeline:
         )
 
         # Test missing GCP credentials
-        with patch.dict(os.environ, {}, clear=True), pytest.raises(
-            ValueError
-        ) as exc_info:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            pytest.raises(ValueError) as exc_info,
+        ):
             pipeline.open_spider(spider)
         assert "Missing GCP credentials path" in str(exc_info.value)
 
         # Test invalid GCP credentials file
-        with patch.dict(
-            os.environ, {"GOOGLE_APPLICATION_CREDENTIALS": "/invalid/path.json"}
-        ), patch("os.path.exists", return_value=False), pytest.raises(
-            FileNotFoundError
-        ) as exc_info:
+        with (
+            patch.dict(
+                os.environ, {"GOOGLE_APPLICATION_CREDENTIALS": "/invalid/path.json"}
+            ),
+            patch("os.path.exists", return_value=False),
+            pytest.raises(FileNotFoundError) as exc_info,
+        ):
             pipeline.open_spider(spider)
         assert "GCP credentials file not found" in str(exc_info.value)
 
         # Test bucket does not exist
-        with patch.dict(
-            os.environ, {"GOOGLE_APPLICATION_CREDENTIALS": "service-account.json"}
-        ), patch("os.path.exists", return_value=True), patch(
-            "google.cloud.storage.Client"
-        ) as mock_client:
+        with (
+            patch.dict(
+                os.environ, {"GOOGLE_APPLICATION_CREDENTIALS": "service-account.json"}
+            ),
+            patch("os.path.exists", return_value=True),
+            patch("google.cloud.storage.Client") as mock_client,
+        ):
             mock_bucket = Mock()
             mock_bucket.exists.return_value = False
             mock_client.return_value.bucket.return_value = mock_bucket
@@ -918,9 +925,10 @@ class TestSuumoImagesPipeline:
         ]
 
         # Mock GCS upload and logger
-        with patch.object(
-            pipeline, "_process_successful_downloads"
-        ) as mock_process, patch.object(pipeline.logger, "warning") as mock_warning:
+        with (
+            patch.object(pipeline, "_process_successful_downloads") as mock_process,
+            patch.object(pipeline.logger, "warning") as mock_warning,
+        ):
             mock_process.return_value = [
                 "https://storage.googleapis.com/bucket/image1.jpg",
                 "https://storage.googleapis.com/bucket/image3.jpg",
