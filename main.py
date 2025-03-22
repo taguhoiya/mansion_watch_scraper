@@ -6,6 +6,7 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 
+import uvicorn
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -13,6 +14,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 from app.apis import api_router
+from app.configs.settings import LOGGING_CONFIG
 from app.db.indexes import ensure_indexes
 from app.db.session import get_client_options
 
@@ -150,6 +152,21 @@ def create_app() -> FastAPI:
             )
 
     return app
+
+
+def main():
+    """Main function."""
+    # Configure logging
+    logging.config.dictConfig(LOGGING_CONFIG)
+
+    # Start the application
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8080,
+        reload=True,
+        reload_dirs=["/app"],
+    )
 
 
 # Create FastAPI application instance

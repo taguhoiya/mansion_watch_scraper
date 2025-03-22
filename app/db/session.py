@@ -58,19 +58,13 @@ def get_client() -> AsyncIOMotorClient:
     return client
 
 
-def get_db(database_name: str = None) -> AsyncIOMotorDatabase:
+def get_db() -> AsyncIOMotorDatabase:
     """Get MongoDB database instance.
-
-    Args:
-        database_name: The name of the database to connect to.
-            If None, uses the default database from settings.
 
     Returns:
         AsyncIOMotorDatabase: The database instance.
     """
-    if database_name is None:
-        database_name = settings.MONGO_DATABASE
-    return get_client()[database_name]
+    return get_client()[settings.MONGO_DATABASE]
 
 
 async def init_db() -> None:

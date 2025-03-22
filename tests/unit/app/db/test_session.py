@@ -1,3 +1,5 @@
+"""Test module for MongoDB index management."""
+
 import os
 import sys
 from unittest.mock import MagicMock, patch
@@ -86,19 +88,10 @@ async def test_get_db_success(mock_env_development):
         mock_db = MagicMock()
         mock_client.__getitem__.return_value = mock_db
 
-        # Test get_db with custom database name
-        db = get_db("test_db")
+        # Test get_db uses the configured database name
+        db = get_db()
         assert db == mock_db
-        mock_client.__getitem__.assert_called_once_with("test_db")
-
-        # Reset mock
-        mock_client.__getitem__.reset_mock()
-
-        # Test get_db with default database name
-        with patch("app.configs.settings.settings.MONGO_DATABASE", "default_db"):
-            db = get_db()
-            assert db == mock_db
-            mock_client.__getitem__.assert_called_once_with("default_db")
+        mock_client.__getitem__.assert_called_once_with(settings.MONGO_DATABASE)
 
 
 @pytest.mark.asyncio
@@ -112,20 +105,6 @@ async def test_get_db_connection_error(mock_env_development):
         with pytest.raises(Exception) as exc_info:
             get_db()
         assert str(exc_info.value) == "Connection failed"
-
-
-@pytest.mark.asyncio
-async def test_get_db_default_database():
-    """Test database connection with default database name."""
-    with patch.dict(os.environ, {}, clear=True):
-        with patch("app.db.session.client") as mock_client:
-            mock_db = MagicMock()
-            mock_client.__getitem__.return_value = mock_db
-
-            # Test get_db uses default database name
-            db = get_db()
-            assert db == mock_db
-            mock_client.__getitem__.assert_called_once_with("mansion_watch")
 
 
 def test_client_singleton():

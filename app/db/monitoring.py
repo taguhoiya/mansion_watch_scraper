@@ -24,27 +24,57 @@ class PerformanceCommandListener(CommandListener):
 
     def started(self, event: CommandStartedEvent) -> None:
         """Handle the start of a command."""
-        logger.info(
-            f"Command {event.command_name} started on database {event.database_name}"
+        # Skip logging for SASL authentication commands
+        if event.command_name.startswith("sasl"):
+            return
+
+        # Log command start with more context
+        logger.debug(
+            "Command %s started on database %s with request_id %s",
+            event.command_name,
+            event.database_name,
+            event.request_id,
         )
 
     def succeeded(self, event: CommandSucceededEvent) -> None:
         """Handle a successful command."""
         duration_ms = event.duration_micros / 1000
         if duration_ms > SLOW_QUERY_MS:
+            # Enhanced slow query logging with more context
             logger.warning(
-                f"Slow query detected: {event.command_name} took {duration_ms:.2f}ms"
+                "Slow query detected: %s took %.2fms on database %s (request_id: %s)",
+                event.command_name,
+                duration_ms,
+                event.database_name,
+                event.request_id,
+            )
+        else:
+            logger.debug(
+                "Command %s succeeded in %.2fms on database %s",
+                event.command_name,
+                duration_ms,
+                event.database_name,
             )
 
     def failed(self, event: CommandFailedEvent) -> None:
         """Handle a failed command."""
         try:
-            duration_ms = float(getattr(event, "duration_micros", 0)) / 1000
+            duration_ms = float(event.duration_micros) / 1000
             logger.error(
-                f"Command {event.command_name} failed in {duration_ms:.2f}ms: {str(event.failure)}"
+                "Command %s failed in %.2fms on database %s: %s (request_id: %s)",
+                event.command_name,
+                duration_ms,
+                event.database_name,
+                str(event.failure),
+                event.request_id,
             )
-        except Exception:
-            logger.error(f"Command {event.command_name} failed: {str(event.failure)}")
+        except Exception as e:
+            logger.error(
+                "Command %s failed with error: %s (Error parsing duration: %s)",
+                event.command_name,
+                str(event.failure),
+                str(e),
+            )
 
 
 def monitor_performance(func: Callable) -> Callable:

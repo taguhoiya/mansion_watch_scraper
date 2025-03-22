@@ -40,4 +40,33 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+LOGGING_CONFIG = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "default": {"format": "%(levelname)s:%(name)s:%(message)s"},
+    },
+    "handlers": {
+        "default": {
+            "formatter": "default",
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout",
+        },
+    },
+    "loggers": {
+        "": {
+            "handlers": ["default"],
+            "level": "INFO",
+        },
+        "app.db.monitoring": {
+            "handlers": ["default"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "motor": {"handlers": ["default"], "level": "WARNING", "propagate": False},
+        "pymongo": {"handlers": ["default"], "level": "WARNING", "propagate": False},
+    },
+}
+
 logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO))

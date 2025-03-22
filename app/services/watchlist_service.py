@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import List
 
@@ -8,6 +9,8 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.models.apis.watchlist import UserWatchlist
 from app.models.common_overview import CommonOverview
 from app.models.property_overview import PropertyOverview
+
+logger = logging.getLogger(__name__)
 
 
 class WatchlistService:
@@ -44,13 +47,24 @@ class WatchlistService:
         # Enrich properties with additional information
         enriched_properties = []
         for prop in properties:
-            prop_id = prop["_id"]
-            enriched_prop = await self._enrich_property(prop_id, prop)
-            enriched_properties.append(enriched_prop)
+            try:
+                prop_id = prop["_id"]
+                enriched_prop = await self._enrich_property(prop_id, prop)
+                if enriched_prop:
+                    enriched_properties.append(enriched_prop)
+            except Exception as e:
+                # Log the error but continue processing other properties
+                logger.error(
+                    "Error enriching property %s: %s",
+                    prop_id,
+                    str(e),
+                )
 
         return enriched_properties
 
-    async def _enrich_property(self, prop_id: ObjectId, prop: dict) -> UserWatchlist:
+    async def _enrich_property(
+        self, prop_id: ObjectId, prop: dict
+    ) -> UserWatchlist | None:
         """
         Enrich a property with overview information.
 
@@ -78,7 +92,7 @@ class WatchlistService:
             if key not in prop:
                 prop[key] = value
 
-        # Add property overview information
+        # Add property overview information if available
         prop_ov = await self._get_property_overview(prop_id)
         if prop_ov:
             prop.update(
@@ -90,8 +104,13 @@ class WatchlistService:
                     "other_area": prop_ov["other_area"],
                 }
             )
+        else:
+            logger.warning(
+                "Property overview not found for property %s, using defaults",
+                prop_id,
+            )
 
-        # Add common overview information
+        # Add common overview information if available
         common_ov = await self._get_common_overview(prop_id)
         if common_ov:
             prop.update(
@@ -100,6 +119,11 @@ class WatchlistService:
                     "transportation": common_ov["transportation"],
                 }
             )
+        else:
+            logger.warning(
+                "Common overview not found for property %s, using defaults",
+                prop_id,
+            )
 
         # Only keep the first image URL if available
         if "image_urls" in prop and prop["image_urls"]:
@@ -107,7 +131,15 @@ class WatchlistService:
         else:
             prop["image_urls"] = []
 
-        return UserWatchlist(**prop)
+        try:
+            return UserWatchlist(**prop)
+        except Exception as e:
+            logger.error(
+                "Failed to create watchlist item for property %s: %s",
+                prop_id,
+                str(e),
+            )
+            return None
 
     async def _get_property_overview(
         self, prop_id: ObjectId
