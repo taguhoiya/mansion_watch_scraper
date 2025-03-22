@@ -22,15 +22,15 @@ USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36
 ROBOTSTXT_OBEY = True
 
 # Configure maximum concurrent requests performed by Scrapy (default: 16)
-CONCURRENT_REQUESTS = 1
+CONCURRENT_REQUESTS = 2
 
 # Configure a delay for requests for the same website (default: 0)
-# See https://docs.scrapy.org/en/latest/topics/settings.html#download-delay
-# See also autothrottle settings and docs
-DOWNLOAD_DELAY = 3
+DOWNLOAD_DELAY = 3  # Balanced delay between requests
+RANDOMIZE_DOWNLOAD_DELAY = True
 
 # Disable cookies (enabled by default)
-# COOKIES_ENABLED = False
+COOKIES_ENABLED = True
+COOKIES_DEBUG = False
 
 # Disable Telnet Console (enabled by default)
 # TELNETCONSOLE_ENABLED = False
@@ -49,7 +49,7 @@ DOWNLOAD_DELAY = 3
 
 # Configure retry settings
 RETRY_ENABLED = True
-RETRY_TIMES = 5
+RETRY_TIMES = 5  # Reduced retry attempts
 RETRY_HTTP_CODES = [
     500,
     502,
@@ -59,17 +59,10 @@ RETRY_HTTP_CODES = [
     524,
     408,
     429,
-    302,
-    301,
-    303,
-    307,
-    308,
-    403,
-    404,
-]
+]  # Removed redirect and not found codes
 
 # Configure download settings
-DOWNLOAD_TIMEOUT = 60
+DOWNLOAD_TIMEOUT = 60  # Reduced timeout
 
 # Configure image pipeline settings
 IMAGES_STORE_FORMAT = "JPEG"
@@ -83,6 +76,20 @@ IMAGES_DOMAINS = [
     "img03.suumo.com",
     "maintenance.suumo.jp",
 ]
+
+# Enable caching
+HTTPCACHE_ENABLED = False
+# HTTPCACHE_EXPIRATION_SECS = 3600
+# HTTPCACHE_DIR = "httpcache"
+# HTTPCACHE_IGNORE_HTTP_CODES = [503, 504, 400, 401, 403, 404, 408, 429]
+# HTTPCACHE_STORAGE = "scrapy.extensions.httpcache.FilesystemCacheStorage"
+
+# Configure AutoThrottle
+AUTOTHROTTLE_ENABLED = True
+AUTOTHROTTLE_START_DELAY = 3
+AUTOTHROTTLE_MAX_DELAY = 30  # Reduced max delay
+AUTOTHROTTLE_TARGET_CONCURRENCY = 1.5  # Slightly increased concurrency
+AUTOTHROTTLE_DEBUG = False
 
 # Configure downloader middlewares
 DOWNLOADER_MIDDLEWARES = {
@@ -104,14 +111,6 @@ ITEM_PIPELINES = {
     "mansion_watch_scraper.pipelines.MongoPipeline": 300,
     "mansion_watch_scraper.pipelines.SuumoImagesPipeline": 1,
 }
-
-# Enable and configure HTTP caching (disabled by default)
-# See https://docs.scrapy.org/en/latest/topics/downloader-middleware.html#httpcache-middleware-settings
-# HTTPCACHE_ENABLED = True
-# HTTPCACHE_EXPIRATION_SECS = 0
-# HTTPCACHE_DIR = "httpcache"
-# HTTPCACHE_IGNORE_HTTP_CODES = []
-# HTTPCACHE_STORAGE = "scrapy.extensions.httpcache.FilesystemCacheStorage"
 
 # Set settings whose default value is deprecated to a future-proof value
 TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
