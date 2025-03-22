@@ -25,12 +25,12 @@ ROBOTSTXT_OBEY = True
 CONCURRENT_REQUESTS = 1
 
 # Configure a delay for requests for the same website (default: 0)
-# See https://docs.scrapy.org/en/latest/topics/settings.html#download-delay
-# See also autothrottle settings and docs
-DOWNLOAD_DELAY = 3
+DOWNLOAD_DELAY = 5  # Increase delay between requests
+RANDOMIZE_DOWNLOAD_DELAY = True  # Add randomization to delays
 
 # Disable cookies (enabled by default)
-# COOKIES_ENABLED = False
+COOKIES_ENABLED = True
+COOKIES_DEBUG = False
 
 # Disable Telnet Console (enabled by default)
 # TELNETCONSOLE_ENABLED = False
@@ -49,7 +49,7 @@ DOWNLOAD_DELAY = 3
 
 # Configure retry settings
 RETRY_ENABLED = True
-RETRY_TIMES = 5
+RETRY_TIMES = 8  # Increase retry attempts
 RETRY_HTTP_CODES = [
     500,
     502,
@@ -69,7 +69,7 @@ RETRY_HTTP_CODES = [
 ]
 
 # Configure download settings
-DOWNLOAD_TIMEOUT = 60
+DOWNLOAD_TIMEOUT = 90  # Increase timeout
 
 # Configure image pipeline settings
 IMAGES_STORE_FORMAT = "JPEG"
@@ -83,6 +83,20 @@ IMAGES_DOMAINS = [
     "img03.suumo.com",
     "maintenance.suumo.jp",
 ]
+
+# Enable caching
+HTTPCACHE_ENABLED = False
+# HTTPCACHE_EXPIRATION_SECS = 3600
+# HTTPCACHE_DIR = "httpcache"
+# HTTPCACHE_IGNORE_HTTP_CODES = [503, 504, 400, 401, 403, 404, 408, 429]
+# HTTPCACHE_STORAGE = "scrapy.extensions.httpcache.FilesystemCacheStorage"
+
+# Configure AutoThrottle
+AUTOTHROTTLE_ENABLED = True
+AUTOTHROTTLE_START_DELAY = 5
+AUTOTHROTTLE_MAX_DELAY = 60
+AUTOTHROTTLE_TARGET_CONCURRENCY = 1.0
+AUTOTHROTTLE_DEBUG = False
 
 # Configure downloader middlewares
 DOWNLOADER_MIDDLEWARES = {
@@ -104,14 +118,6 @@ ITEM_PIPELINES = {
     "mansion_watch_scraper.pipelines.MongoPipeline": 300,
     "mansion_watch_scraper.pipelines.SuumoImagesPipeline": 1,
 }
-
-# Enable and configure HTTP caching (disabled by default)
-# See https://docs.scrapy.org/en/latest/topics/downloader-middleware.html#httpcache-middleware-settings
-# HTTPCACHE_ENABLED = True
-# HTTPCACHE_EXPIRATION_SECS = 0
-# HTTPCACHE_DIR = "httpcache"
-# HTTPCACHE_IGNORE_HTTP_CODES = []
-# HTTPCACHE_STORAGE = "scrapy.extensions.httpcache.FilesystemCacheStorage"
 
 # Set settings whose default value is deprecated to a future-proof value
 TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"

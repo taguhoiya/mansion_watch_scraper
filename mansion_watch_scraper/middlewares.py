@@ -137,7 +137,10 @@ class AntiScrapingMiddleware:
             "Sec-Ch-Ua-Platform": '"macOS"',
             "Upgrade-Insecure-Requests": "1",
             "Cache-Control": "max-age=0",
+            "DNT": "1",
+            "Sec-GPC": "1",
         }
+
         # Headers specific to regular page requests
         self.page_specific_headers = {
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
@@ -146,6 +149,7 @@ class AntiScrapingMiddleware:
             "Sec-Fetch-Site": "same-origin",
             "Sec-Fetch-User": "?1",
         }
+
         # Headers specific to image requests
         self.image_specific_headers = {
             "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
@@ -175,6 +179,7 @@ class AntiScrapingMiddleware:
                 {
                     "nowtime": str(int(time.time())),  # Current timestamp
                     "uid": f"uid_{uuid.uuid4().hex[:16]}",  # Random user ID
+                    "session": f"session_{uuid.uuid4().hex}",  # Random session ID
                 }
             )
             # Set referer based on the request's domain
@@ -186,11 +191,14 @@ class AntiScrapingMiddleware:
         else:
             request.headers.update(self.page_specific_headers)
 
-        # Add random delay between requests
-        time.sleep(random.uniform(2.0, 4.0))
+        # Add random delay between requests (2-6 seconds)
+        time.sleep(random.uniform(2.0, 6.0))
         return None
 
     def process_response(self, request, response, spider):
+        # If we get a 503, add a longer delay before retrying
+        if response.status == 503:
+            time.sleep(random.uniform(10.0, 20.0))
         return response
 
 
