@@ -28,13 +28,10 @@ def get_client_options() -> Dict[str, Any]:
         "connectTimeoutMS": settings.MONGO_CONNECT_TIMEOUT_MS,
         "waitQueueTimeoutMS": settings.MONGO_WAIT_QUEUE_TIMEOUT_MS,
         "heartbeatFrequencyMS": 10000,  # More frequent server checks
-        "localThresholdMS": 15,  # Smaller threshold for selecting nearest server,
-        "retryReads": True,
-        "w": "majority",
-        "journal": True,
+        "localThresholdMS": 15,  # Smaller threshold for selecting nearest server
     }
 
-    # Enable TLS only for Atlas or production environments
+    # Enable TLS and other security settings for MongoDB Atlas or production environments
     if "mongodb+srv" in settings.MONGO_URI or settings.ENV not in [
         "development",
         "docker",
@@ -43,6 +40,9 @@ def get_client_options() -> Dict[str, Any]:
             {
                 "tls": True,
                 "tlsAllowInvalidCertificates": False,
+                "retryReads": True,
+                "w": "majority",
+                "journal": True,
             }
         )
 
