@@ -1,11 +1,10 @@
-FROM python:3.13.1-slim
+FROM --platform=linux/amd64 python:3.11.7-slim
 
 WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
   build-essential \
-  python3-dev \
   && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first to leverage Docker cache
@@ -27,9 +26,15 @@ ENV PYTHONUNBUFFERED=1
 ENV PORT=8080
 ENV GRPC_DNS_RESOLVER=native
 ENV GOOGLE_APPLICATION_CREDENTIALS=/app/secrets/service-account.json
+ENV PUBSUB_SUBSCRIPTION=mansion-watch-scraper-sub-push
+ENV PUBSUB_TOPIC=mansion-watch-scraper-topic
+ENV MONGO_URI="mongodb+srv://mansionwatch:mansiondaisuki@mansionwatch.mbt6a.mongodb.net/?retryWrites=true&w=majority&appName=MansionWatch"
+
+# Expose the port
+EXPOSE 8080
 
 # Add proper signal handling
 STOPSIGNAL SIGTERM
 
-# Run both the Pub/Sub subscriber and health check server
-CMD ["sh", "-c", "python -m mansion_watch_scraper.pubsub.service & python -m mansion_watch_scraper.pubsub.health"]
+# Run the HTTP server for push subscription
+CMD ["python", "-m", "mansion_watch_scraper.pubsub.health"]
