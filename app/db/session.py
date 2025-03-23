@@ -43,12 +43,12 @@ def get_client_options() -> Dict:
         "readPreference": "primaryPreferred",  # Read preference
     }
 
-    # Add TLS options in production
-    if settings.ENV == "production":
+    # Add TLS options for MongoDB Atlas connection
+    if "mongodb+srv" in settings.MONGO_URI:
         options.update(
             {
-                "tls": True,  # Enable TLS for secure connection
-                "tlsAllowInvalidCertificates": False,  # Require valid certificates (default)
+                "tls": True,
+                "tlsAllowInvalidCertificates": False,
             }
         )
 

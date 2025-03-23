@@ -65,8 +65,6 @@ def test_get_client_options_production(mock_env_production):
         assert options["retryReads"] is True
         assert options["w"] == "majority"
         assert options["readPreference"] == "primaryPreferred"
-        assert options["tls"] is True
-        assert options["tlsAllowInvalidCertificates"] is False
 
 
 @pytest.fixture
