@@ -19,18 +19,18 @@ NEWSPIDER_MODULE = "mansion_watch_scraper.spiders"
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 
 # Obey robots.txt rules
-ROBOTSTXT_OBEY = True
+ROBOTSTXT_OBEY = False
 
 # Configure maximum concurrent requests performed by Scrapy (default: 16)
-CONCURRENT_REQUESTS = 2
+CONCURRENT_REQUESTS = 1
 
 # Configure a delay for requests for the same website (default: 0)
-DOWNLOAD_DELAY = 3  # Balanced delay between requests
-RANDOMIZE_DOWNLOAD_DELAY = True
+DOWNLOAD_DELAY = 0  # No delay for single URL checks
+RANDOMIZE_DOWNLOAD_DELAY = False
 
-# Disable cookies (enabled by default)
+# Enable cookies and cookie debugging
 COOKIES_ENABLED = True
-COOKIES_DEBUG = False
+COOKIES_DEBUG = False  # Disable cookie debugging
 
 # Disable Telnet Console (enabled by default)
 # TELNETCONSOLE_ENABLED = False
@@ -43,26 +43,17 @@ COOKIES_DEBUG = False
 
 # Configure spider middlewares
 # See https://docs.scrapy.org/en/latest/topics/spider-middleware.html
-# SPIDER_MIDDLEWARES = {
-#    "mansion_watch_scraper.middlewares.MansionWatchScraperSpiderMiddleware": 543,
-# }
+SPIDER_MIDDLEWARES = {
+    "scrapy.spidermiddlewares.httperror.HttpErrorMiddleware": 543,
+}
 
 # Configure retry settings
 RETRY_ENABLED = True
-RETRY_TIMES = 5  # Reduced retry attempts
-RETRY_HTTP_CODES = [
-    500,
-    502,
-    503,
-    504,
-    522,
-    524,
-    408,
-    429,
-]  # Removed redirect and not found codes
+RETRY_TIMES = 3
+RETRY_HTTP_CODES = [500, 502, 503, 504, 408, 429]  # Don't retry 404s
 
 # Configure download settings
-DOWNLOAD_TIMEOUT = 60  # Reduced timeout
+DOWNLOAD_TIMEOUT = 120  # Increased from 30 to 120 seconds
 
 # Configure image pipeline settings
 IMAGES_STORE_FORMAT = "JPEG"
@@ -85,10 +76,10 @@ HTTPCACHE_ENABLED = False
 # HTTPCACHE_STORAGE = "scrapy.extensions.httpcache.FilesystemCacheStorage"
 
 # Configure AutoThrottle
-AUTOTHROTTLE_ENABLED = True
+AUTOTHROTTLE_ENABLED = False  # Disable auto throttle for single URL checks
 AUTOTHROTTLE_START_DELAY = 3
-AUTOTHROTTLE_MAX_DELAY = 30  # Reduced max delay
-AUTOTHROTTLE_TARGET_CONCURRENCY = 1.5  # Slightly increased concurrency
+AUTOTHROTTLE_MAX_DELAY = 10  # Reduced max delay
+AUTOTHROTTLE_TARGET_CONCURRENCY = 1.0  # Reduced concurrency
 AUTOTHROTTLE_DEBUG = False
 
 # Configure downloader middlewares
@@ -97,13 +88,23 @@ DOWNLOADER_MIDDLEWARES = {
     "scrapy.downloadermiddlewares.retry.RetryMiddleware": None,
     "mansion_watch_scraper.middlewares.AntiScrapingMiddleware": 400,
     "mansion_watch_scraper.middlewares.CustomRetryMiddleware": 550,
+    "scrapy.downloadermiddlewares.httpcompression.HttpCompressionMiddleware": 810,
+    "scrapy.downloadermiddlewares.redirect.RedirectMiddleware": 900,
 }
 
 # Enable or disable extensions
 # See https://docs.scrapy.org/en/latest/topics/extensions.html
-# EXTENSIONS = {
-#    "scrapy.extensions.telnet.TelnetConsole": None,
-# }
+EXTENSIONS = {
+    "scrapy.extensions.telnet.TelnetConsole": None,
+    "scrapy.extensions.memusage.MemoryUsage": None,
+    "scrapy.extensions.logstats.LogStats": None,
+    "scrapy.extensions.corestats.CoreStats": None,
+    "scrapy.extensions.spiderstate.SpiderState": None,
+    "scrapy.extensions.throttle.AutoThrottle": None,
+}
+
+# Disable version display
+VERSIONS_DISPLAY = False
 
 # Configure item pipelines
 # See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
@@ -117,7 +118,7 @@ TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
 FEED_EXPORT_ENCODING = "utf-8"
 
 # Set a page count limit for the spider
-CLOSESPIDER_PAGECOUNT = 10
+CLOSESPIDER_PAGECOUNT = 1  # Only scrape one page since we're checking single URLs
 
 # Set mongo db settings
 # Change the value of MONGO_URI to "mongodb://localhost:27017" if you are running the MongoDB server locally
@@ -125,8 +126,20 @@ CLOSESPIDER_PAGECOUNT = 10
 MONGO_DATABASE = "mansion_watch"
 MONGO_URI = os.getenv("MONGO_URI")
 
-# Set the log level
-LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG")
+# Configure logging to be minimal
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+LOG_FORMAT = "%(levelname)s: %(message)s"
+LOG_DATEFORMAT = "%H:%M:%S"
+LOG_SHORT_NAMES = True
+LOG_STDOUT = False
+LOG_ENABLED = True  # Enable Scrapy's logging but control it through LOG_LEVEL
+
+# Disable various logging
+LOG_SPIDER_OPENED = False  # Don't log when spider is opened
+LOG_SPIDER_CLOSED = False  # Don't log when spider is closed
+LOG_SCRAPED_ITEMS = False  # Don't log scraped items
+LOG_STATS = False  # Don't log stats
+LOG_DUPEFILTER = False  # Don't log filtered duplicate requests
 
 # Set the images store
 IMAGES_STORE = os.getenv("IMAGES_STORE")

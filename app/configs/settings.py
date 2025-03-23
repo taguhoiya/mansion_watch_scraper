@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     GCP_FOLDER_NAME: str
     GCS_IMAGE_QUALITY: int
     PUBSUB_TOPIC: str = "mansion-watch-scraper"
-    PUBSUB_SUBSCRIPTION: str = "mansion-watch-scraper-sub"
+    PUBSUB_SUBSCRIPTION: str = "mansion-watch-scraper-sub-push"
     MONGO_MAX_POOL_SIZE: int = 100
     MONGO_MIN_POOL_SIZE: int = 3
     MONGO_MAX_IDLE_TIME_MS: int = 30000

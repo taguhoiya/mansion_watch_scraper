@@ -2,6 +2,8 @@ scrapy
 pymongo
 google-cloud-pubsub  # Only needed if using Pub/Sub
 google-cloud-logging  # Only needed if using Pub/Sub
+google-cloud-storage  # For storing images in GCS
+Pillow  # For image processing
 pydantic
 line-bot-sdk
 
