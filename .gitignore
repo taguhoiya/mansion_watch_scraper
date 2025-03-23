@@ -13,3 +13,6 @@ service-account.json
 .coverage
 coverage.xml
 htmlcov/
+
+# Ignore the env file
+.env.prod
