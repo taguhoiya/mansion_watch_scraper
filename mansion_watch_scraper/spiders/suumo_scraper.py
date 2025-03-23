@@ -43,8 +43,8 @@ class MansionWatchSpider(scrapy.Spider):
         "CONCURRENT_REQUESTS": 1,
         "DOWNLOAD_DELAY": 0,
         "CLOSESPIDER_PAGECOUNT": 1,
-        "LOG_ENABLED": False,
-        "LOG_LEVEL": "ERROR",
+        "LOG_ENABLED": True,
+        "LOG_LEVEL": "WARNING",
         "LOG_STDOUT": False,
         "LOG_FILE": None,
         "LOG_SPIDER_OPENED": False,
@@ -153,57 +153,6 @@ class MansionWatchSpider(scrapy.Spider):
         }
         return None
 
-    def _handle_error_response(self, response):
-        """Handle non-200 HTTP responses."""
-        error_msg = ""
-        if response.status == 404:
-            error_msg = "Property not found (404). The URL may be incorrect or the property listing may have been removed."
-        elif response.status == 403:
-            error_msg = "Access forbidden (403). The site may be blocking scrapers."
-        elif response.status == 500:
-            error_msg = "Server error (500). The property site is experiencing issues."
-        else:
-            error_msg = f"HTTP error {response.status}"
-
-        self.logger.error(f"HttpError on {response.url}")
-        self.logger.error(f"HTTP Status Code: {response.status}")
-        self.logger.error(error_msg)
-
-        self.results = {
-            "status": "not_found" if response.status == 404 else "error",
-            "error_type": "HttpError",
-            "error_message": error_msg,
-            "url": response.url,
-        }
-        return None
-
-    def _handle_check_only(self, response):
-        """Handle check-only mode processing."""
-        property_name = self._extract_property_name(response)
-        if not property_name:
-            error_msg = "Property name not found in response"
-            self.logger.error(error_msg)
-            self.results = {
-                "status": "error",
-                "error_type": "ParseError",
-                "error_message": error_msg,
-                "url": response.url,
-            }
-            return None
-
-        original_url = response.meta.get("original_url", "")
-        is_redirected_to_library = self._is_redirected_to_library(
-            response, original_url
-        )
-
-        self.results = {
-            "status": "success",
-            "property_name": property_name,
-            "is_sold": is_redirected_to_library,
-            "url": response.url,
-        }
-        return None
-
     def parse(self, response):
         """Parse the response and handle any HTTP errors."""
         self.logger.info(
@@ -212,10 +161,12 @@ class MansionWatchSpider(scrapy.Spider):
 
         try:
             if response.status != 200:
-                return self._handle_error_response(response)
+                self._handle_error_response(response)
+                return
 
             if self.check_only:
-                return self._handle_check_only(response)
+                self._handle_check_only(response)
+                return
 
             property_item = self._extract_property_info(response)
             if not property_item:
@@ -224,7 +175,7 @@ class MansionWatchSpider(scrapy.Spider):
                     "Failed to extract property information",
                     {"url": response.url},
                 )
-                return None
+                return
 
             current_time = datetime.now()
             property_overview = self._extract_property_overview(
@@ -259,7 +210,56 @@ class MansionWatchSpider(scrapy.Spider):
                 "error_message": str(e),
                 "url": response.url,
             }
-            return None
+            return
+
+    def _handle_error_response(self, response):
+        """Handle non-200 HTTP responses."""
+        error_msg = ""
+        if response.status == 404:
+            error_msg = "Property not found (404). The URL may be incorrect or the property listing may have been removed."
+        elif response.status == 403:
+            error_msg = "Access forbidden (403). The site may be blocking scrapers."
+        elif response.status == 500:
+            error_msg = "Server error (500). The property site is experiencing issues."
+        else:
+            error_msg = f"HTTP error {response.status}"
+
+        self.logger.error(f"HttpError on {response.url}")
+        self.logger.error(f"HTTP Status Code: {response.status}")
+        self.logger.error(error_msg)
+
+        self.results = {
+            "status": "not_found" if response.status == 404 else "error",
+            "error_type": "HttpError",
+            "error_message": error_msg,
+            "url": response.url,
+        }
+
+    def _handle_check_only(self, response):
+        """Handle check-only mode processing."""
+        property_name = self._extract_property_name(response)
+        if not property_name:
+            error_msg = "Property name not found in response"
+            self.logger.error(error_msg)
+            self.results = {
+                "status": "error",
+                "error_type": "ParseError",
+                "error_message": error_msg,
+                "url": response.url,
+            }
+            return
+
+        original_url = response.meta.get("original_url", "")
+        is_redirected_to_library = self._is_redirected_to_library(
+            response, original_url
+        )
+
+        self.results = {
+            "status": "success",
+            "property_name": property_name,
+            "is_sold": is_redirected_to_library,
+            "url": response.url,
+        }
 
     def _log_http_error(
         self, level: str, context: Dict[str, Any], error: Exception
