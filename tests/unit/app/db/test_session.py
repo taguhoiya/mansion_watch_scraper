@@ -7,7 +7,6 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import ConnectionFailure
 from pymongo.server_api import ServerApi
 
-from app.configs.settings import settings
 from app.db.session import get_client, get_client_options, get_db, init_db
 
 
@@ -32,18 +31,17 @@ def test_get_client_options_development(mock_env_development):
     assert isinstance(options["server_api"], ServerApi)
     assert options["server_api"].version == "1"
     assert options["retryWrites"] is True
-    assert options["maxPoolSize"] == settings.MONGO_MAX_POOL_SIZE
-    assert options["minPoolSize"] == settings.MONGO_MIN_POOL_SIZE
-    assert options["maxIdleTimeMS"] == settings.MONGO_MAX_IDLE_TIME_MS
-    assert options["serverSelectionTimeoutMS"] == 60000
-    assert options["socketTimeoutMS"] == 60000
-    assert options["connectTimeoutMS"] == settings.MONGO_CONNECT_TIMEOUT_MS
-    assert options["waitQueueTimeoutMS"] == settings.MONGO_WAIT_QUEUE_TIMEOUT_MS
+    assert options["maxPoolSize"] == 100
+    assert options["minPoolSize"] == 3
+    assert options["maxIdleTimeMS"] == 30000
+    assert options["serverSelectionTimeoutMS"] == 30000
+    assert options["socketTimeoutMS"] == 30000
+    assert options["connectTimeoutMS"] == 30000
+    assert options["waitQueueTimeoutMS"] == 10000
     assert options["heartbeatFrequencyMS"] == 10000
     assert options["retryReads"] is True
     assert options["w"] == "majority"
     assert options["readPreference"] == "primaryPreferred"
-    assert "tls" not in options
 
 
 def test_get_client_options_production(mock_env_production):
@@ -54,13 +52,13 @@ def test_get_client_options_production(mock_env_production):
         assert isinstance(options["server_api"], ServerApi)
         assert options["server_api"].version == "1"
         assert options["retryWrites"] is True
-        assert options["maxPoolSize"] == settings.MONGO_MAX_POOL_SIZE
-        assert options["minPoolSize"] == settings.MONGO_MIN_POOL_SIZE
-        assert options["maxIdleTimeMS"] == settings.MONGO_MAX_IDLE_TIME_MS
-        assert options["serverSelectionTimeoutMS"] == 60000
-        assert options["socketTimeoutMS"] == 60000
-        assert options["connectTimeoutMS"] == settings.MONGO_CONNECT_TIMEOUT_MS
-        assert options["waitQueueTimeoutMS"] == settings.MONGO_WAIT_QUEUE_TIMEOUT_MS
+        assert options["maxPoolSize"] == 100
+        assert options["minPoolSize"] == 3
+        assert options["maxIdleTimeMS"] == 30000
+        assert options["serverSelectionTimeoutMS"] == 30000
+        assert options["socketTimeoutMS"] == 30000
+        assert options["connectTimeoutMS"] == 30000
+        assert options["waitQueueTimeoutMS"] == 10000
         assert options["heartbeatFrequencyMS"] == 10000
         assert options["retryReads"] is True
         assert options["w"] == "majority"

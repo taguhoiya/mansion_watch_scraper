@@ -49,8 +49,8 @@ def get_client_options() -> Dict:
             {
                 "tls": True,
                 "tlsAllowInvalidCertificates": False,
-                "maxPoolSize": 10,  # Recommended for serverless environments
-                "minPoolSize": 0,  # Allow pool to scale down when idle
+                "maxPoolSize": settings.MONGO_MAX_POOL_SIZE,
+                "minPoolSize": settings.MONGO_MIN_POOL_SIZE,
             }
         )
 
