@@ -33,9 +33,9 @@ def get_client_options() -> Dict:
         "maxPoolSize": settings.MONGO_MAX_POOL_SIZE,
         "minPoolSize": settings.MONGO_MIN_POOL_SIZE,
         "maxIdleTimeMS": settings.MONGO_MAX_IDLE_TIME_MS,
-        "serverSelectionTimeoutMS": 60000,  # 60 seconds
-        "socketTimeoutMS": 60000,  # 60 seconds
-        "connectTimeoutMS": settings.MONGO_CONNECT_TIMEOUT_MS,
+        "serverSelectionTimeoutMS": 30000,  # 30 seconds
+        "socketTimeoutMS": 30000,  # 30 seconds
+        "connectTimeoutMS": 30000,  # 30 seconds
         "waitQueueTimeoutMS": settings.MONGO_WAIT_QUEUE_TIMEOUT_MS,
         "heartbeatFrequencyMS": 10000,  # 10 seconds
         "retryReads": True,
@@ -49,11 +49,8 @@ def get_client_options() -> Dict:
             {
                 "tls": True,
                 "tlsAllowInvalidCertificates": False,
-                "retryWrites": True,
-                "w": "majority",
-                "authSource": "admin",
-                "serverSelectionTimeoutMS": 20000,
-                "connectTimeoutMS": 20000,
+                "maxPoolSize": 10,  # Recommended for serverless environments
+                "minPoolSize": 0,  # Allow pool to scale down when idle
             }
         )
 
