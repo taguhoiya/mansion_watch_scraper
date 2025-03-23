@@ -191,13 +191,17 @@ class AntiScrapingMiddleware:
         else:
             request.headers.update(self.page_specific_headers)
 
-        # Add shorter random delay (1-3 seconds)
-        time.sleep(random.uniform(1.0, 3.0))
+        # Skip delays for single URL checks
+        if not hasattr(spider, "check_only") or not spider.check_only:
+            # Add shorter random delay (1-3 seconds)
+            time.sleep(random.uniform(1.0, 3.0))
         return None
 
     def process_response(self, request, response, spider):
         # If we get a 503, add a shorter delay before retrying
-        if response.status == 503:
+        if response.status == 503 and (
+            not hasattr(spider, "check_only") or not spider.check_only
+        ):
             time.sleep(random.uniform(5.0, 10.0))
         return response
 
