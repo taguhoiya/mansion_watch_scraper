@@ -1,0 +1,41 @@
+runtime: custom
+env: flex
+
+service: default
+
+automatic_scaling:
+  min_num_instances: 1
+  max_num_instances: 10
+  cool_down_period_sec: 180
+  cpu_utilization:
+    target_utilization: 0.6
+
+resources:
+  cpu: 1
+  memory_gb: 2
+  disk_size_gb: 10
+
+env_variables:
+  COLLECTION_COMMON_OVERVIEWS: "common_overviews"
+  COLLECTION_PROPERTIES: "properties"
+  COLLECTION_PROPERTY_IMAGES: "property_images"
+  COLLECTION_PROPERTY_OVERVIEWS: "property_overviews"
+  COLLECTION_USERS: "users"
+  COLLECTION_USER_PROPERTIES: "user_properties"
+  ENV: "production"
+  GCP_BUCKET_NAME: "mansion_watch"
+  GCP_FOLDER_NAME: "property_images"
+  GCP_PROJECT_ID: "daring-night-451212-a8"
+  GCS_IMAGE_QUALITY: "30"
+  GOOGLE_APPLICATION_CREDENTIALS: "service-account.json"
+  IMAGES_STORE: "tmp/images"
+  LINE_CHANNEL_ACCESS_TOKEN: "MHG7Jp5j0F4KDtKjL133ZzJiIUJCIetLi64/zVmsnyOPvSwjJduOwdoFeNpl4WH/A2IpF6OC8qVTXtpCAh4cdyJR9y81siUP9b480fLuicy0NHj64YzSEAmVMLLR7wNF6K2ii7fx5aLkLP27d8siBgdB04t89/1O/w1cDnyilFU="
+  LINE_CHANNEL_SECRET: "5791e6648f52603e9999a7d50d3866c1"
+  LOG_LEVEL: "INFO"
+  MONGO_CONNECT_TIMEOUT_MS: "20000"
+  MONGO_DATABASE: "mansion_watch"
+  MONGO_MAX_IDLE_TIME_MS: "30000"
+  MONGO_MAX_POOL_SIZE: "100"
+  MONGO_MIN_POOL_SIZE: "3"
+  MONGO_URI: "mongodb+srv://mansionwatch:mansiondaisuki@mansionwatch.mbt6a.mongodb.net/?retryWrites=true&w=majority&appName=MansionWatch"
+  MONGO_WAIT_QUEUE_TIMEOUT_MS: "10000"
