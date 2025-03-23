@@ -1,0 +1,13 @@
+scrapy
+pymongo
+google-cloud-pubsub  # Only needed if using Pub/Sub
+google-cloud-logging  # Only needed if using Pub/Sub
+pydantic
+line-bot-sdk
+
+# Optional development dependencies
+pytest
+pytest-asyncio
+pytest-cov
+pytest-mock
+python-dotenv
