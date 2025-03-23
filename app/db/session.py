@@ -47,9 +47,13 @@ def get_client_options() -> Dict:
     if "mongodb+srv" in settings.MONGO_URI:
         options.update(
             {
-                "tls": True,  # Use TLS for the connection
-                "tlsCAFile": "/etc/ssl/certs/ca-certificates.crt",  # System CA certificates
-                "tlsAllowInvalidCertificates": False,  # Require valid certificates
+                "tls": True,
+                "tlsAllowInvalidCertificates": False,
+                "retryWrites": True,
+                "w": "majority",
+                "authSource": "admin",
+                "serverSelectionTimeoutMS": 20000,
+                "connectTimeoutMS": 20000,
             }
         )
 
