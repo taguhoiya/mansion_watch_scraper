@@ -6,11 +6,14 @@ This module contains pipelines for:
 2. Processing and uploading images to Google Cloud Storage
 """
 
+import hashlib
 import io
 import logging
 import os
+import re
 import tempfile
 import time
+import urllib.parse
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, TypeVar, Union
 
@@ -519,6 +522,86 @@ class SuumoImagesPipeline(ImagesPipeline):
         processed = download_image(image_request, self.tmp_dir)
         return processed.path if processed else None
 
+    def _get_blob_name(self, url: str) -> str:
+        """Generate a unique and safe blob name for GCS storage.
+
+        Args:
+            url: Original image URL from SUUMO
+        Returns:
+            A sanitized blob name suitable for GCS
+        """
+        try:
+            # Decode the URL first
+            decoded_url = urllib.parse.unquote(url)
+
+            # For SUUMO URLs, extract the actual image path from the src parameter
+            if "resizeImage" in decoded_url:
+                parsed_qs = urllib.parse.parse_qs(
+                    urllib.parse.urlparse(decoded_url).query
+                )
+                if "src" in parsed_qs:
+                    # Get the actual image path from src parameter
+                    image_path = urllib.parse.unquote(parsed_qs["src"][0])
+                    # Extract meaningful parts from the path
+                    parts = image_path.split("/")
+                    if len(parts) >= 2:
+                        # Use the last two parts of the path to create a unique filename
+                        filename = f"{parts[-2]}_{parts[-1]}"
+                    else:
+                        filename = parts[-1]
+                else:
+                    # Fallback to hash if src parameter is not found
+                    hash_object = hashlib.md5(decoded_url.encode())
+                    filename = f"image_{hash_object.hexdigest()[:10]}.jpg"
+            else:
+                # For non-resizeImage URLs, use the last part of the path
+                filename = os.path.basename(decoded_url)
+                if not filename or filename.startswith("?"):
+                    hash_object = hashlib.md5(decoded_url.encode())
+                    filename = f"image_{hash_object.hexdigest()[:10]}.jpg"
+
+            # Ensure the filename has a proper extension
+            if not filename.lower().endswith((".jpg", ".jpeg", ".png", ".gif")):
+                filename += ".jpg"
+
+            # Remove any query parameters from the filename
+            filename = filename.split("?")[0]
+
+            # Sanitize the filename to remove any potentially problematic characters
+            filename = re.sub(r"[^a-zA-Z0-9._-]", "_", filename)
+
+            return f"{self.folder_name}/{filename}"
+        except Exception as e:
+            self.logger.error(f"Error generating blob name for URL {url}: {str(e)}")
+            # Fallback to hash in case of any error
+            hash_object = hashlib.md5(url.encode())
+            return f"{self.folder_name}/image_{hash_object.hexdigest()[:10]}.jpg"
+
+    def _upload_to_gcs(self, image_path: str, original_url: str) -> Optional[str]:
+        """Upload the image to Google Cloud Storage."""
+        try:
+            blob_name = self._get_blob_name(original_url)
+
+            # Double check if image exists before uploading
+            if check_blob_exists(self.bucket, blob_name):
+                return f"https://storage.googleapis.com/{self.bucket_name}/{blob_name}"
+
+            blob = self.bucket.blob(blob_name)
+
+            # Upload the file without ACL parameter
+            blob.upload_from_filename(
+                image_path, content_type="image/jpeg"  # Set the content type explicitly
+            )
+
+            return f"https://storage.googleapis.com/{self.bucket_name}/{blob_name}"
+        except Exception as e:
+            self.logger.error(f"Error uploading to GCS: {str(e)}, URL: {original_url}")
+            return None
+
+    def _upload_image_to_gcs(self, image_path: str, original_url: str) -> Optional[str]:
+        """Upload an image to Google Cloud Storage."""
+        return self._upload_to_gcs(image_path, original_url)
+
     def process_item(self, item: Dict[str, Any], spider) -> Dict[str, Any]:
         """Process each item and handle image downloads."""
         image_urls = item.get("image_urls", [])
@@ -536,8 +619,7 @@ class SuumoImagesPipeline(ImagesPipeline):
         new_uploads = 0
 
         for request in requests:
-            filename = os.path.basename(request.url)
-            blob_name = f"{self.folder_name}/{filename}"
+            blob_name = self._get_blob_name(request.url)
 
             # Check if image already exists in GCS
             if check_blob_exists(self.bucket, blob_name):
@@ -583,23 +665,6 @@ class SuumoImagesPipeline(ImagesPipeline):
 
         return item
 
-    def _upload_to_gcs(self, image_path: str, original_url: str) -> Optional[str]:
-        """Upload the image to Google Cloud Storage."""
-        try:
-            filename = os.path.basename(original_url)
-            blob_name = f"{self.folder_name}/{filename}"
-
-            # Double check if image exists before uploading
-            if check_blob_exists(self.bucket, blob_name):
-                return f"https://storage.googleapis.com/{self.bucket_name}/{blob_name}"
-
-            blob = self.bucket.blob(blob_name)
-            blob.upload_from_filename(image_path)
-            return f"https://storage.googleapis.com/{self.bucket_name}/{blob_name}"
-        except Exception as e:
-            self.logger.error(f"Error uploading to GCS: {str(e)}")
-            return None
-
     def _cleanup_temp_directory(self, directory: Optional[str] = None) -> bool:
         """Clean up temporary directory."""
         try:
@@ -620,61 +685,100 @@ class SuumoImagesPipeline(ImagesPipeline):
             self.logger.error(f"Error cleaning up temporary directory: {e}")
             return False
 
+    def _count_failed_downloads(self, results):
+        """Count and log failed downloads.
+
+        Args:
+            results: List of download results
+        Returns:
+            Number of failed downloads
+        """
+        failed_downloads = len([r for r, i in results if not r])
+        if failed_downloads > 0:
+            self.logger.warning(f"Failed to download {failed_downloads} images")
+        return failed_downloads
+
+    def _get_successful_downloads(self, results):
+        """Extract successful downloads from results.
+
+        Args:
+            results: List of download results
+        Returns:
+            List of successful download results
+        """
+        return [
+            result[1] for result in results if result[0] and isinstance(result[1], dict)
+        ]
+
+    def _process_successful_downloads(self, successful_downloads):
+        """Process successful downloads and get GCS URLs.
+
+        Args:
+            successful_downloads: List of successful download results
+        Returns:
+            List of GCS URLs
+        """
+        gcs_urls = []
+        for download in successful_downloads:
+            if "path" in download:
+                url = self._upload_image_to_gcs(download["path"])
+                if url:
+                    gcs_urls.append(url)
+                    # Cache the mapping between original URL and GCS URL
+                    if "url" in download:
+                        self.image_url_to_gcs_url[download["url"]] = url
+        return gcs_urls
+
+    def _get_cached_gcs_urls(self, results):
+        """Get cached GCS URLs for failed downloads.
+
+        Args:
+            results: List of download results
+        Returns:
+            List of cached GCS URLs
+        """
+        cached_urls = []
+        for result in results:
+            if not result[0] and isinstance(result[1], Exception):
+                original_url = getattr(result[1], "url", None)
+                if original_url and original_url in self.image_url_to_gcs_url:
+                    cached_urls.append(self.image_url_to_gcs_url[original_url])
+        return cached_urls
+
+    def _update_item_urls(self, item, gcs_urls):
+        """Update item with GCS URLs.
+
+        Args:
+            item: Item to update
+            gcs_urls: List of GCS URLs
+        """
+        if not gcs_urls:
+            return
+
+        self.logger.info(f"Successfully processed {len(gcs_urls)} images")
+        properties = item.get("properties")
+        if isinstance(properties, Property):
+            properties.image_urls = gcs_urls
+        elif properties is not None:
+            item["properties"]["image_urls"] = gcs_urls
+
     def item_completed(self, results, item, info):
         """Process completed downloads."""
         if not results:
             return item
 
         # Count failed downloads
-        failed_downloads = len([r for r, i in results if not r])
-        if failed_downloads > 0:
-            self.logger.warning(f"Failed to download {failed_downloads} images")
+        self._count_failed_downloads(results)
 
         # Process successful downloads
-        successful_downloads = [
-            result[1] for result in results if result[0] and isinstance(result[1], dict)
-        ]
-
-        # Process successful downloads and get GCS URLs
+        successful_downloads = self._get_successful_downloads(results)
         gcs_urls = self._process_successful_downloads(successful_downloads)
 
-        # Update the item with GCS URLs
-        properties = item.get("properties")
-        if isinstance(properties, Property):
-            properties.image_urls = gcs_urls
-        else:
-            item["properties"]["image_urls"] = gcs_urls
+        # Get cached GCS URLs for failed downloads
+        cached_urls = self._get_cached_gcs_urls(results)
+        gcs_urls.extend(cached_urls)
+
+        # Update item with all GCS URLs
+        self._update_item_urls(item, gcs_urls)
 
         return item
-
-    def _process_successful_downloads(self, image_paths: List[str]) -> List[str]:
-        """Process successful downloads and upload to GCS."""
-        gcs_image_urls = []
-        for path in image_paths:
-            url = self._upload_image_to_gcs(path)
-            if url:
-                gcs_image_urls.append(url)
-
-        if gcs_image_urls:
-            self.logger.info(
-                f"Successfully uploaded {len(gcs_image_urls)} images to GCS"
-            )
-
-        return gcs_image_urls
-
-    def _upload_image_to_gcs(self, image_path: str) -> Optional[str]:
-        """Upload an image to Google Cloud Storage."""
-        try:
-            filename = os.path.basename(image_path)
-            blob_name = f"{self.folder_name}/{filename}"
-
-            # Check if image already exists in GCS
-            if check_blob_exists(self.bucket, blob_name):
-                return f"https://storage.googleapis.com/{self.bucket_name}/{blob_name}"
-
-            blob = self.bucket.blob(blob_name)
-            blob.upload_from_filename(image_path)
-            return f"https://storage.googleapis.com/{self.bucket_name}/{blob_name}"
-        except Exception as e:
-            self.logger.error(f"Error uploading image to GCS: {str(e)}")
-            return None
