@@ -33,9 +33,9 @@ def get_client_options() -> Dict:
         "maxPoolSize": settings.MONGO_MAX_POOL_SIZE,
         "minPoolSize": settings.MONGO_MIN_POOL_SIZE,
         "maxIdleTimeMS": settings.MONGO_MAX_IDLE_TIME_MS,
-        "serverSelectionTimeoutMS": 60000,  # 60 seconds
-        "socketTimeoutMS": 60000,  # 60 seconds
-        "connectTimeoutMS": settings.MONGO_CONNECT_TIMEOUT_MS,
+        "serverSelectionTimeoutMS": 30000,  # 30 seconds
+        "socketTimeoutMS": 30000,  # 30 seconds
+        "connectTimeoutMS": 30000,  # 30 seconds
         "waitQueueTimeoutMS": settings.MONGO_WAIT_QUEUE_TIMEOUT_MS,
         "heartbeatFrequencyMS": 10000,  # 10 seconds
         "retryReads": True,
@@ -43,12 +43,14 @@ def get_client_options() -> Dict:
         "readPreference": "primaryPreferred",  # Read preference
     }
 
-    # Add TLS options in production
-    if settings.ENV == "production":
+    # Add TLS options for MongoDB Atlas connection
+    if "mongodb+srv" in settings.MONGO_URI:
         options.update(
             {
-                "tls": True,  # Enable TLS for secure connection
-                "tlsAllowInvalidCertificates": False,  # Require valid certificates (default)
+                "tls": True,
+                "tlsAllowInvalidCertificates": False,
+                "maxPoolSize": settings.MONGO_MAX_POOL_SIZE,
+                "minPoolSize": settings.MONGO_MIN_POOL_SIZE,
             }
         )
 
