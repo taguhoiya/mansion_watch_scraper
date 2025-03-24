@@ -140,13 +140,20 @@ class TestMongoPipeline:
     @pytest.fixture
     def pipeline(self):
         """Create a MongoPipeline instance."""
-        return MongoPipeline(
-            mongo_uri=TEST_MONGO_URI,
-            mongo_db=TEST_MONGO_DB,
-            images_store=TEST_IMAGES_STORE,
-            gcp_bucket_name=TEST_GCP_BUCKET,
-            gcp_folder_name=TEST_GCP_FOLDER,
+        settings = Settings()
+        settings.setdict(
+            {
+                "MONGO_URI": TEST_MONGO_URI,
+                "MONGO_DATABASE": TEST_MONGO_DB,
+                "IMAGES_STORE": TEST_IMAGES_STORE,
+                "GCP_BUCKET_NAME": TEST_GCP_BUCKET,
+                "GCP_FOLDER_NAME": TEST_GCP_FOLDER,
+                "PUBSUB_TOPIC": "test-topic",
+                "PUBSUB_SUBSCRIPTION": "test-subscription",
+                "GCP_PROJECT_ID": "test-project",
+            }
         )
+        return MongoPipeline.from_crawler(Mock(settings=settings))
 
     @pytest.fixture
     def mock_db(self):
@@ -720,13 +727,23 @@ class TestMongoPipeline:
 @pytest.fixture
 def pipeline():
     """Create a SuumoImagesPipeline instance."""
-    settings = Settings(
+    settings = Settings()
+    settings.setdict(
         {
-            "IMAGES_STORE": "tmp/images",
-            "GCP_BUCKET_NAME": "mansion_watch",
-            "GCP_FOLDER_NAME": "property_images",
-            "MONGO_URI": "mongodb://localhost:27017",
-            "MONGO_DATABASE": "mansion_watch",
+            "IMAGES_STORE": TEST_IMAGES_STORE,
+            "GCP_BUCKET_NAME": TEST_GCP_BUCKET,
+            "GCP_FOLDER_NAME": TEST_GCP_FOLDER,
+            "IMAGES_URLS_FIELD": "image_urls",
+            "IMAGES_RESULT_FIELD": "images",
+            "IMAGES_MIN_HEIGHT": 50,
+            "IMAGES_MIN_WIDTH": 50,
+            "IMAGES_STORE_FORMAT": "JPEG",
+            "IMAGES_DOMAINS": ["img01.suumo.com"],
+            "MONGO_URI": TEST_MONGO_URI,
+            "MONGO_DATABASE": TEST_MONGO_DB,
+            "PUBSUB_TOPIC": "test-topic",
+            "PUBSUB_SUBSCRIPTION": "test-subscription",
+            "GCP_PROJECT_ID": "test-project",
         }
     )
     crawler = Mock()

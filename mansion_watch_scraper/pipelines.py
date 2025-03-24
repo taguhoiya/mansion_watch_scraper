@@ -617,42 +617,54 @@ class SuumoImagesPipeline(ImagesPipeline):
         processed_urls = []
         existing_images = 0
         new_uploads = 0
+        failed_uploads = 0
 
-        for request in requests:
+        self.logger.info(
+            f"Starting to process {len(requests)} images for property: {item.get('properties', {}).get('name', 'Unknown')}"
+        )
+
+        for i, request in enumerate(requests, 1):
             blob_name = self._get_blob_name(request.url)
+            self.logger.debug(f"Processing image {i}/{len(requests)}: {request.url}")
 
             # Check if image already exists in GCS
             if check_blob_exists(self.bucket, blob_name):
                 gcs_url = (
                     f"https://storage.googleapis.com/{self.bucket_name}/{blob_name}"
                 )
+                self.logger.debug(f"Image already exists in GCS: {blob_name}")
                 processed_urls.append(gcs_url)
                 # Cache the URL for future use
                 self.image_url_to_gcs_url[request.url] = gcs_url
                 existing_images += 1
                 continue
 
+            self.logger.debug(f"Downloading image from: {request.url}")
             image_path = self._process_single_request(request)
             if not image_path:
                 self.logger.error(f"Failed to process image: {request.url}")
+                failed_uploads += 1
                 continue
 
+            self.logger.debug(f"Uploading image to GCS: {blob_name}")
             gcs_url = self._upload_to_gcs(image_path, request.url)
             if not gcs_url:
                 self.logger.error(f"Failed to upload image to GCS: {request.url}")
+                failed_uploads += 1
                 continue
 
             processed_urls.append(gcs_url)
             # Cache the URL for future use
             self.image_url_to_gcs_url[request.url] = gcs_url
             new_uploads += 1
+            self.logger.debug(f"Successfully uploaded image to: {gcs_url}")
 
         # Log summary of processed images
         total_images = len(requests)
         self.logger.info(
-            f"Image processing summary - Total: {total_images}, "
-            f"Existing: {existing_images}, New uploads: {new_uploads}, "
-            f"Failed: {total_images - (existing_images + new_uploads)}"
+            f"Image processing summary for {item.get('properties', {}).get('name', 'Unknown')}:\n"
+            f"Total: {total_images}, Existing: {existing_images}, "
+            f"New uploads: {new_uploads}, Failed: {failed_uploads}"
         )
 
         if processed_urls:

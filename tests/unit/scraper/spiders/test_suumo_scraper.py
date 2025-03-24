@@ -78,14 +78,13 @@ class TestMansionWatchSpider:
             True  # This will make failure.check(HttpError) return True
         )
         mock_failure.value.response = mock_response
+        mock_failure.type = type("HttpError", (), {"__name__": "HttpError"})
 
         # Call the errback method
         spider.errback_httpbin(mock_failure)
 
-        # Check that the logger was called with the correct messages at the INFO level
-        mock_logger.info.assert_any_call("HttpError on %s", mock_response.url)
-        mock_logger.info.assert_any_call("HTTP Status Code: %s", mock_response.status)
-        mock_logger.info.assert_any_call(
+        # Assert that the error was logged
+        mock_logger.error.assert_called_with(
             "Property not found (404). The URL may be incorrect or the property listing may have been removed."
         )
 
@@ -103,14 +102,13 @@ class TestMansionWatchSpider:
             True  # This will make failure.check(HttpError) return True
         )
         mock_failure.value.response = mock_response
+        mock_failure.type = type("HttpError", (), {"__name__": "HttpError"})
 
         # Call the errback method
         spider.errback_httpbin(mock_failure)
 
-        # Check that the logger was called with the correct messages at the ERROR level
-        mock_logger.error.assert_any_call("HttpError on %s", mock_response.url)
-        mock_logger.error.assert_any_call("HTTP Status Code: %s", mock_response.status)
-        mock_logger.error.assert_any_call(
+        # Assert that the error was logged
+        mock_logger.error.assert_called_with(
             "Access forbidden (403). The site may be blocking scrapers."
         )
 
@@ -128,14 +126,13 @@ class TestMansionWatchSpider:
             True  # This will make failure.check(HttpError) return True
         )
         mock_failure.value.response = mock_response
+        mock_failure.type = type("HttpError", (), {"__name__": "HttpError"})
 
         # Call the errback method
         spider.errback_httpbin(mock_failure)
 
-        # Check that the logger was called with the correct messages at the ERROR level
-        mock_logger.error.assert_any_call("HttpError on %s", mock_response.url)
-        mock_logger.error.assert_any_call("HTTP Status Code: %s", mock_response.status)
-        mock_logger.error.assert_any_call(
+        # Assert that the error was logged
+        mock_logger.error.assert_called_with(
             "Server error (500). The property site is experiencing issues."
         )
 
@@ -150,14 +147,15 @@ class TestMansionWatchSpider:
         mock_failure = MagicMock()
         mock_failure.check.side_effect = lambda error_type: error_type == DNSLookupError
         mock_failure.request = mock_request
+        mock_failure.type = type("DNSLookupError", (), {"__name__": "DNSLookupError"})
+        mock_failure.value = "Could not resolve domain name"
 
         # Call the errback method
         spider.errback_httpbin(mock_failure)
 
-        # Check that the logger was called with the correct messages
-        mock_logger.error.assert_any_call("DNSLookupError on %s", mock_request.url)
-        mock_logger.error.assert_any_call(
-            "Could not resolve domain name. Check internet connection or if the domain exists."
+        # Assert that the error was logged with the formatted message
+        mock_logger.error.assert_called_with(
+            "Request failed for URL https://nonexistent.example.com: DNSLookupError - Could not resolve domain name"
         )
 
     @patch("mansion_watch_scraper.spiders.suumo_scraper.MansionWatchSpider.logger")
@@ -174,12 +172,13 @@ class TestMansionWatchSpider:
             or TCPTimedOutError in error_types
         )
         mock_failure.request = mock_request
+        mock_failure.type = type("TimeoutError", (), {"__name__": "TimeoutError"})
+        mock_failure.value = "Request timed out"
 
         # Call the errback method
         spider.errback_httpbin(mock_failure)
 
-        # Check that the logger was called with the correct messages
-        mock_logger.error.assert_any_call("TimeoutError on %s", mock_request.url)
-        mock_logger.error.assert_any_call(
-            "Request timed out. The server may be slow or unresponsive."
+        # Assert that the error was logged with the formatted message
+        mock_logger.error.assert_called_with(
+            "Request failed for URL https://slow.example.com: TimeoutError - Request timed out"
         )

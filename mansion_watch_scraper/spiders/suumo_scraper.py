@@ -6,9 +6,8 @@ from typing import Any, Dict, List, Optional
 
 import scrapy
 from bson.objectid import ObjectId
+from dotenv import load_dotenv
 from scrapy.http import Response
-from scrapy.spidermiddlewares.httperror import HttpError
-from twisted.internet.error import DNSLookupError, TCPTimedOutError, TimeoutError
 
 from app.models.common_overview import COMMON_OVERVIEW_TRANSLATION_MAP, CommonOverview
 from app.models.property import Property
@@ -19,31 +18,70 @@ from app.models.property_overview import (
 from app.services.utils import translate_keys
 from enums.html_element_keys import ElementKeys
 
+load_dotenv()
+
 
 class MansionWatchSpider(scrapy.Spider):
     """Spider for scraping mansion property details from SUUMO website."""
 
     name = "mansion_watch_scraper"
     allowed_domains = ["suumo.jp"]
+    custom_settings = {
+        "ROBOTSTXT_OBEY": False,
+        "COOKIES_ENABLED": False,
+        "DOWNLOAD_TIMEOUT": 120,
+        "RETRY_ENABLED": True,  # Enable retries
+        "RETRY_TIMES": 3,  # Try up to 3 times
+        "RETRY_HTTP_CODES": [
+            500,
+            502,
+            503,
+            504,
+            408,
+            429,
+        ],  # Retry on these status codes
+        "CONCURRENT_REQUESTS": 1,
+        "DOWNLOAD_DELAY": 0,
+        "CLOSESPIDER_PAGECOUNT": 1,
+        "LOG_ENABLED": True,
+        "LOG_LEVEL": "WARNING",
+        "LOG_STDOUT": False,
+        "LOG_FILE": None,
+        "LOG_SPIDER_OPENED": False,
+        "LOG_SPIDER_CLOSED": False,
+        "LOG_SCRAPED_ITEMS": False,
+        "LOG_STATS": False,
+        "LOG_DUPEFILTER": False,
+        "STATS_DUMP": False,
+        "EXTENSIONS": {},
+        "EXTENSIONS_BASE": {},
+        "TELNETCONSOLE_ENABLED": False,
+        "FEED_EXPORT_ENABLED": False,
+        "FEED_STORAGES": {},
+        "FEED_EXPORTERS": {},
+        "FEED_EXPORT_BATCH_ITEM_COUNT": 0,
+        "LOGSTATS_INTERVAL": 0,
+        "ITEM_PIPELINES": {
+            "mansion_watch_scraper.pipelines.MongoPipeline": 300,
+            "mansion_watch_scraper.pipelines.SuumoImagesPipeline": 1,
+        },
+    }
 
     def __init__(
         self,
         url: Optional[str] = None,
         line_user_id: Optional[str] = None,
+        check_only: bool = False,
         *args,
         **kwargs,
     ):
-        """Initialize the spider with URL and user ID.
-
-        Args:
-            url: The URL to scrape
-            line_user_id: The Line user ID
-        Raises:
-            ValueError: If url or line_user_id is missing or invalid
-        """
+        """Initialize the spider with URL and user ID."""
         super(MansionWatchSpider, self).__init__(*args, **kwargs)
         if url is not None:
             self.start_urls = [url]
+        else:
+            self.start_urls = []
+
         if line_user_id is not None:
             if not line_user_id.startswith("U"):
                 raise ValueError("line_user_id must start with U")
@@ -52,6 +90,176 @@ class MansionWatchSpider(scrapy.Spider):
             raise ValueError(
                 f"Both url and line_user_id are required. url: {url}, line_user_id: {line_user_id}"
             )
+        self.check_only = check_only
+        self.results = {}
+
+        # Configure spider settings based on check_only mode
+        if check_only:
+            self.custom_settings["ITEM_PIPELINES"] = {}
+        else:
+            self.custom_settings["ITEM_PIPELINES"] = {
+                "mansion_watch_scraper.pipelines.MongoPipeline": 300,
+                "mansion_watch_scraper.pipelines.SuumoImagesPipeline": 1,
+            }
+
+    def start_requests(self):
+        """Start the scraping requests with error handling."""
+        for url in self.start_urls:
+            self.logger.info(f"Making request to URL: {url}")
+            yield scrapy.Request(
+                url=url,
+                callback=self.parse,
+                dont_filter=True,
+                meta={
+                    "original_url": url,
+                    "dont_retry": False,
+                    "handle_httpstatus_list": [404, 403, 500],
+                },
+                errback=self.errback_httpbin,
+                headers={
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                    "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+                    "Cache-Control": "no-cache",
+                    "Pragma": "no-cache",
+                },
+            )
+
+    def errback_httpbin(self, failure):
+        """Handle request failures."""
+        error_type = failure.type.__name__
+        error_msg = str(failure.value)
+        url = failure.request.url
+
+        self.logger.error(f"Request failed for URL {url}: {error_type} - {error_msg}")
+
+        if hasattr(failure.value, "response") and failure.value.response is not None:
+            status = failure.value.response.status
+            if status == 404:
+                error_msg = "Property not found (404). The URL may be incorrect or the property listing may have been removed."
+            elif status == 403:
+                error_msg = "Access forbidden (403). The site may be blocking scrapers."
+            elif status == 500:
+                error_msg = (
+                    "Server error (500). The property site is experiencing issues."
+                )
+            self.logger.error(f"HTTP Status Code: {status}")
+            self.logger.error(error_msg)
+
+        self.results = {
+            "status": "error",
+            "error_type": error_type,
+            "error_message": error_msg,
+            "url": url,
+        }
+        return None
+
+    def parse(self, response):
+        """Parse the response and handle any HTTP errors."""
+        self.logger.info(
+            f"Received response from {response.url} with status {response.status}"
+        )
+
+        try:
+            if response.status != 200:
+                self._handle_error_response(response)
+                return
+
+            if self.check_only:
+                self._handle_check_only(response)
+                return
+
+            property_item = self._extract_property_info(response)
+            if not property_item:
+                self._log_structured(
+                    "error",
+                    "Failed to extract property information",
+                    {"url": response.url},
+                )
+                return
+
+            current_time = datetime.now()
+            property_overview = self._extract_property_overview(
+                response, property_item.name, current_time, property_item.id
+            )
+            common_overview = self._extract_common_overview(
+                response, current_time, property_item.id
+            )
+
+            user_property = {
+                "line_user_id": self.line_user_id,
+                "property_id": property_item.id,
+                "last_aggregated_at": current_time,
+                "next_aggregated_at": current_time + timedelta(days=3),
+            }
+
+            yield {
+                "properties": property_item.model_dump(),
+                "property_overviews": property_overview,
+                "common_overviews": common_overview,
+                "user_properties": user_property,
+                "image_urls": property_item.image_urls,
+            }
+
+        except Exception as e:
+            self._log_structured(
+                "error", "Error in parse method", {"url": response.url}, error=e
+            )
+            self.results = {
+                "status": "error",
+                "error_type": e.__class__.__name__,
+                "error_message": str(e),
+                "url": response.url,
+            }
+            return
+
+    def _handle_error_response(self, response):
+        """Handle non-200 HTTP responses."""
+        error_msg = ""
+        if response.status == 404:
+            error_msg = "Property not found (404). The URL may be incorrect or the property listing may have been removed."
+        elif response.status == 403:
+            error_msg = "Access forbidden (403). The site may be blocking scrapers."
+        elif response.status == 500:
+            error_msg = "Server error (500). The property site is experiencing issues."
+        else:
+            error_msg = f"HTTP error {response.status}"
+
+        self.logger.error(f"HttpError on {response.url}")
+        self.logger.error(f"HTTP Status Code: {response.status}")
+        self.logger.error(error_msg)
+
+        self.results = {
+            "status": "not_found" if response.status == 404 else "error",
+            "error_type": "HttpError",
+            "error_message": error_msg,
+            "url": response.url,
+        }
+
+    def _handle_check_only(self, response):
+        """Handle check-only mode processing."""
+        property_name = self._extract_property_name(response)
+        if not property_name:
+            error_msg = "Property name not found in response"
+            self.logger.error(error_msg)
+            self.results = {
+                "status": "error",
+                "error_type": "ParseError",
+                "error_message": error_msg,
+                "url": response.url,
+            }
+            return
+
+        original_url = response.meta.get("original_url", "")
+        is_redirected_to_library = self._is_redirected_to_library(
+            response, original_url
+        )
+
+        self.results = {
+            "status": "success",
+            "property_name": property_name,
+            "is_sold": is_redirected_to_library,
+            "url": response.url,
+        }
 
     def _log_http_error(
         self, level: str, context: Dict[str, Any], error: Exception
@@ -165,53 +373,6 @@ class MansionWatchSpider(scrapy.Spider):
             # Fallback to simple logging if JSON serialization fails
             self.logger.error(f"Failed to serialize log data: {str(e)}")
             self.logger.error(message)
-
-    def start_requests(self):
-        """Start the scraping requests with error handling."""
-        for url in self.start_urls:
-            yield scrapy.Request(
-                url=url,
-                callback=self.parse,
-                errback=self.errback_httpbin,
-                dont_filter=True,
-                meta={
-                    "original_url": url
-                },  # Store the original URL for redirect detection
-            )
-
-    def errback_httpbin(self, failure):
-        """Handle errors during HTTP requests."""
-        if failure.check(HttpError):
-            response = failure.value.response
-            if response.status == 404:
-                self.logger.info("HttpError on %s", response.url)
-                self.logger.info("HTTP Status Code: %s", response.status)
-                self.logger.info(
-                    "Property not found (404). The URL may be incorrect or the property listing may have been removed."
-                )
-            else:
-                self.logger.error("HttpError on %s", response.url)
-                self.logger.error("HTTP Status Code: %s", response.status)
-                if response.status == 403:
-                    self.logger.error(
-                        "Access forbidden (403). The site may be blocking scrapers."
-                    )
-                elif response.status == 500:
-                    self.logger.error(
-                        "Server error (500). The property site is experiencing issues."
-                    )
-        elif failure.check(DNSLookupError):
-            request = failure.request
-            self.logger.error("DNSLookupError on %s", request.url)
-            self.logger.error(
-                "Could not resolve domain name. Check internet connection or if the domain exists."
-            )
-        elif failure.check(TimeoutError, TCPTimedOutError):
-            request = failure.request
-            self.logger.error("TimeoutError on %s", request.url)
-            self.logger.error(
-                "Request timed out. The server may be slow or unresponsive."
-            )
 
     def _extract_property_name(self, response: Response) -> Optional[str]:
         """Extract the property name from the response.
@@ -639,78 +800,6 @@ class MansionWatchSpider(scrapy.Spider):
         )
 
         return CommonOverview(**overview_dict)
-
-    def parse(self, response: Response):
-        """Parse the response from SUUMO.
-
-        Args:
-            response: Response object
-
-        Yields:
-            Item with property information
-        """
-        try:
-            # Extract property information and create Property object
-            property_item = self._extract_property_info(response)
-            if not property_item:
-                self._log_structured(
-                    "error",
-                    "Failed to extract property information",
-                    {"url": response.url},
-                )
-                return None
-
-            # Get current time for consistency
-            current_time = datetime.now()
-
-            # Extract property overview and common overview
-            property_overview = self._extract_property_overview(
-                response,
-                property_item.name,
-                current_time,
-                property_item.id,
-            )
-
-            common_overview = self._extract_common_overview(
-                response,
-                current_time,
-                property_item.id,
-            )
-
-            # Create user property data
-            user_property = {
-                "line_user_id": self.line_user_id,
-                "property_id": property_item.id,
-                "last_aggregated_at": current_time,
-                "next_aggregated_at": current_time + timedelta(days=3),
-            }
-
-            # Create item dictionary with all data
-            item = {
-                "properties": property_item.model_dump(),
-                "property_overviews": property_overview,
-                "common_overviews": common_overview,
-                "user_properties": user_property,
-                "image_urls": property_item.image_urls,
-            }
-
-            self._log_structured(
-                "info",
-                "Successfully parsed all property information",
-                {
-                    "url": response.url,
-                    "property_name": property_item.name,
-                    "image_count": len(property_item.image_urls),
-                },
-            )
-
-            yield item
-
-        except Exception as e:
-            self._log_structured(
-                "error", "Error in parse method", {"url": response.url}, error=e
-            )
-            return None
 
     def _validate_property_name(self, property_name: Optional[str], url: str) -> None:
         """Validate that a property name was found.

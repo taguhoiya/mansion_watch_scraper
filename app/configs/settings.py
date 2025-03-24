@@ -10,7 +10,9 @@ class Settings(BaseSettings):
     LOG_LEVEL: str
     PROJECT_NAME: str = "Mansion Watch Scraper"
     MONGO_DATABASE: str = "mansion_watch"
+    MONGODB_DATABASE: str = "mansion_watch"  # For compatibility
     MONGO_URI: str = "mongodb://localhost:27017"
+    MONGODB_URI: str = "mongodb://localhost:27017"  # For compatibility
     COLLECTION_USERS: str
     COLLECTION_USER_PROPERTIES: str
     COLLECTION_PROPERTIES: str
@@ -25,6 +27,11 @@ class Settings(BaseSettings):
     GCP_BUCKET_NAME: str
     GCP_FOLDER_NAME: str
     GCS_IMAGE_QUALITY: int
+    PUBSUB_TOPIC: str = "mansion-watch-scraper"
+    PUBSUB_SUBSCRIPTION: str = "mansion-watch-scraper-sub-push"
+    PUBSUB_MAX_MESSAGES: int = 100
+    PUBSUB_MAX_BYTES: int = 10485760  # 10MB
+    PUBSUB_MAX_LEASE_DURATION: int = 3600  # 1 hour
     MONGO_MAX_POOL_SIZE: int = 100
     MONGO_MIN_POOL_SIZE: int = 3
     MONGO_MAX_IDLE_TIME_MS: int = 30000
