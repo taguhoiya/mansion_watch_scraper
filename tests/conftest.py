@@ -139,3 +139,20 @@ def mock_env_vars() -> Generator[None, None, None]:
     # Restore original environment variables
     os.environ.clear()
     os.environ.update(original_env)
+
+
+@pytest.fixture(autouse=True)
+def mock_google_auth():
+    """Mock Google Cloud authentication for all tests."""
+    with patch("google.auth.default") as mock:
+        mock.return_value = (MagicMock(), "mock-project")
+        yield mock
+
+
+@pytest.fixture(autouse=True)
+def mock_google_cloud_storage():
+    """Mock Google Cloud Storage for all tests."""
+    with patch("google.cloud.storage.Client") as mock:
+        mock_client = MagicMock()
+        mock.return_value = mock_client
+        yield mock_client
