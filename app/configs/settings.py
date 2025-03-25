@@ -1,4 +1,6 @@
-import logging
+import json
+import logging.config
+import sys
 
 from pydantic_settings import BaseSettings
 
@@ -48,32 +50,127 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
+
+class StructuredLogFormatter(logging.Formatter):
+    """Formatter that outputs JSON formatted logs compatible with Google Cloud Logging."""
+
+    # Map Python logging levels to GCP severity levels
+    SEVERITY_MAP = {
+        "DEBUG": "DEBUG",
+        "INFO": "INFO",
+        "WARNING": "WARNING",
+        "ERROR": "ERROR",
+        "CRITICAL": "CRITICAL",
+    }
+
+    def __init__(self):
+        super().__init__()
+        self.project_id = settings.GCP_PROJECT_ID
+
+    def format(self, record):
+        """Format log record as JSON."""
+        message = record.getMessage()
+        severity = self.SEVERITY_MAP.get(record.levelname, record.levelname)
+
+        # Basic structured log entry
+        log_dict = {
+            "time": self.formatTime(record),  # Add timestamp
+            "severity": severity,  # Use GCP severity levels
+            "message": message,  # Main display field
+        }
+
+        # Add trace and span if available
+        if hasattr(record, "trace"):
+            log_dict["logging.googleapis.com/trace"] = (
+                f"projects/{self.project_id}/traces/{record.trace}"
+            )
+        if hasattr(record, "span_id"):
+            log_dict["logging.googleapis.com/span_id"] = record.span_id
+
+        # Add source location
+        log_dict["logging.googleapis.com/sourceLocation"] = {
+            "file": record.pathname,
+            "line": record.lineno,
+            "function": record.funcName,
+        }
+
+        # Add error info if present
+        if record.exc_info:
+            log_dict["@type"] = (
+                "type.googleapis.com/google.devtools.clouderrorreporting.v1beta1.ReportedErrorEvent"
+            )
+            log_dict["error"] = self.formatException(record.exc_info)
+
+        # Add any extra fields from the record
+        if hasattr(record, "extra_fields"):
+            log_dict.update(record.extra_fields)
+
+        return json.dumps(log_dict)
+
+
 LOGGING_CONFIG = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
-        "default": {"format": "%(levelname)s:%(name)s:%(message)s"},
+        "structured": {
+            "()": StructuredLogFormatter,
+        },
     },
     "handlers": {
-        "default": {
-            "formatter": "default",
+        "structured": {
             "class": "logging.StreamHandler",
-            "stream": "ext://sys.stdout",
+            "formatter": "structured",
+            "stream": sys.stdout,
         },
     },
     "loggers": {
-        "": {
-            "handlers": ["default"],
-            "level": "INFO",
+        "": {  # Root logger
+            "handlers": ["structured"],
+            "level": settings.LOG_LEVEL.upper(),
+            "propagate": False,
         },
-        "app.db.monitoring": {
-            "handlers": ["default"],
+        "app": {  # App logger
+            "handlers": ["structured"],
+            "level": settings.LOG_LEVEL.upper(),
+            "propagate": False,
+        },
+        "app.db.monitoring": {  # Database monitoring
+            "handlers": ["structured"],
             "level": "WARNING",
             "propagate": False,
         },
-        "motor": {"handlers": ["default"], "level": "WARNING", "propagate": False},
-        "pymongo": {"handlers": ["default"], "level": "WARNING", "propagate": False},
+        "uvicorn": {  # Uvicorn server
+            "handlers": ["structured"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "motor": {  # MongoDB driver
+            "handlers": ["structured"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "pymongo": {  # MongoDB driver
+            "handlers": ["structured"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "google.cloud": {  # Google Cloud client
+            "handlers": ["structured"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "google.auth": {  # Google Auth client
+            "handlers": ["structured"],
+            "level": "WARNING",
+            "propagate": False,
+        },
     },
 }
 
-logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO))
+# Initialize logging configuration
+try:
+    logging.config.dictConfig(LOGGING_CONFIG)
+except Exception as e:
+    # Fallback to basic configuration if dictConfig fails
+    logging.basicConfig(level=settings.LOG_LEVEL.upper())
+    logging.warning(f"Failed to configure structured logging: {e}")

@@ -49,21 +49,75 @@ async def lifespan(app: FastAPI):
             app.mongodb_client.close()
 
 
-def create_app() -> FastAPI:
-    """Create and configure FastAPI application.
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    """Middleware for logging request information."""
 
-    Returns:
-        The configured FastAPI application.
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> JSONResponse:
+        """Process the request and log information."""
+        start_time = time.time()
+        try:
+            # Extract trace context
+            trace_header = request.headers.get("X-Cloud-Trace-Context")
+            if trace_header:
+                trace = trace_header.split("/")
+                trace_id = trace[0]
+                # Add trace context to logging
+                logger.info(
+                    "Processing request",
+                    extra={
+                        "trace": trace_id,
+                        "method": request.method,
+                        "path": request.url.path,
+                    },
+                )
+
+            response = await call_next(request)
+            process_time = time.time() - start_time
+
+            # Log response with trace context if available
+            log_extra = {
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "process_time": process_time,
+            }
+            if trace_header:
+                log_extra["trace"] = trace_id
+
+            logger.info(
+                f"Method: {request.method} Path: {request.url.path} Status: {response.status_code} Time: {process_time:.3f}s",
+                extra=log_extra,
+            )
+
+            response.headers["X-Process-Time"] = str(process_time)
+            return response
+
+        except Exception as e:
+            # Log error with trace context if available
+            log_extra = {
+                "method": request.method,
+                "path": request.url.path,
+                "error": str(e),
+            }
+            if trace_header:
+                log_extra["trace"] = trace_id
+
+            logger.error(
+                f"Error processing request: Method: {request.method} Path: {request.url.path} Error: {str(e)}",
+                extra=log_extra,
+                exc_info=True,
+            )
+            raise
+
+
+def setup_cors(app: FastAPI) -> None:
+    """Configure CORS middleware.
+
+    Args:
+        app: FastAPI application instance
     """
-    # Create FastAPI application
-    app = FastAPI(
-        title="Mansion Watch API",
-        description="API for monitoring mansion listings",
-        version="1.0.0",
-        lifespan=lifespan,
-    )
-
-    # Add CORS middleware
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["https://mansionwatchweb.vercel.app", "http://localhost:3000"],
@@ -74,64 +128,22 @@ def create_app() -> FastAPI:
         max_age=600,
     )
 
-    class RequestLoggingMiddleware(BaseHTTPMiddleware):
-        """Middleware for logging request information."""
 
-        async def dispatch(
-            self, request: Request, call_next: RequestResponseEndpoint
-        ) -> JSONResponse:
-            """Process the request and log information.
+def setup_routes(app: FastAPI) -> None:
+    """Configure application routes.
 
-            Args:
-                request: The incoming request.
-                call_next: The next middleware or endpoint.
-
-            Returns:
-                The response from the next middleware or endpoint.
-            """
-            start_time = time.time()
-            try:
-                response = await call_next(request)
-                process_time = time.time() - start_time
-                logger.info(
-                    "Method: %s Path: %s Status: %d Time: %.3fs",
-                    request.method,
-                    request.url.path,
-                    response.status_code,
-                    process_time,
-                )
-                response.headers["X-Process-Time"] = str(process_time)
-                return response
-            except Exception as e:
-                logger.error(
-                    "Error processing request: Method: %s Path: %s Error: %s",
-                    request.method,
-                    request.url.path,
-                    str(e),
-                )
-                raise
-
-    app.add_middleware(RequestLoggingMiddleware)
-
-    # Add API router
-    app.include_router(api_router)
+    Args:
+        app: FastAPI application instance
+    """
 
     @app.get("/")
     async def root() -> Dict[str, str]:
-        """Root endpoint.
-
-        Returns:
-            A welcome message.
-        """
+        """Root endpoint."""
         return {"message": "Welcome to Mansion Watch API"}
 
     @app.get("/health")
     async def health_check() -> Dict[str, Any]:
-        """Health check endpoint.
-
-        Returns:
-            The health status of the application.
-        """
+        """Health check endpoint."""
         if not hasattr(app, "mongodb") or app.mongodb is None:
             return JSONResponse(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -142,12 +154,8 @@ def create_app() -> FastAPI:
                 },
             )
         try:
-            # Test database connection with timeout
             await app.mongodb.command("ping", maxTimeMS=5000)
-            return {
-                "status": "healthy",
-                "database": "connected",
-            }
+            return {"status": "healthy", "database": "connected"}
         except Exception as e:
             logger.error("Health check failed: %s", e)
             return JSONResponse(
@@ -158,6 +166,25 @@ def create_app() -> FastAPI:
                     "error": str(e),
                 },
             )
+
+
+def create_app() -> FastAPI:
+    """Create and configure FastAPI application.
+
+    Returns:
+        The configured FastAPI application.
+    """
+    app = FastAPI(
+        title="Mansion Watch API",
+        description="API for monitoring mansion listings",
+        version="1.0.0",
+        lifespan=lifespan,
+    )
+
+    setup_cors(app)
+    app.add_middleware(RequestLoggingMiddleware)
+    app.include_router(api_router)
+    setup_routes(app)
 
     return app
 

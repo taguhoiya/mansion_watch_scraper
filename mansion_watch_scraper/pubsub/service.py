@@ -15,6 +15,7 @@ from scrapy import signals
 from scrapy.crawler import CrawlerProcess
 from scrapy.utils.project import get_project_settings
 
+from app.configs.settings import LOGGING_CONFIG
 from mansion_watch_scraper.spiders.suumo_scraper import MansionWatchSpider
 
 # Set multiprocessing start method to 'spawn' to avoid gRPC fork issues
@@ -35,36 +36,10 @@ if PUBSUB_EMULATOR_HOST:
 
 def configure_logging():
     """Configure logging for the service."""
-    # Clear all existing handlers at the root logger
-    root = logging.getLogger()
-    root.handlers = []
+    # Use the structured logging configuration from settings
+    logging.config.dictConfig(LOGGING_CONFIG)
 
-    # Configure basic logging
-    handler = logging.StreamHandler()
-    handler.setFormatter(
-        logging.Formatter(
-            "%(asctime)s %(levelname)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
-        )
-    )
-
-    # Configure root logger
-    root.addHandler(handler)
-    root.setLevel(logging.WARNING)
-
-    # Configure service logger
-    logger.handlers = []
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
-    logger.propagate = False  # Prevent propagation to root logger
-
-    # Configure pipeline logger
-    pipeline_logger = logging.getLogger("mansion_watch_scraper.pipelines")
-    pipeline_logger.handlers = []
-    pipeline_logger.addHandler(handler)
-    pipeline_logger.setLevel(logging.INFO)
-    pipeline_logger.propagate = False  # Prevent propagation to root logger
-
-    # Configure all other loggers to CRITICAL and prevent propagation
+    # Configure all other loggers to WARNING and prevent propagation
     for logger_name in [
         "scrapy",
         "twisted",
