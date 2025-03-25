@@ -29,6 +29,7 @@ env:
   LOG_LEVEL: DEBUG
   LINE_CHANNEL_SECRET: ${{ secrets.LINE_CHANNEL_SECRET }}
   LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+  GOOGLE_APPLICATION_CREDENTIALS: dummy-credentials.json
 
 jobs:
   unit-tests:
@@ -44,6 +45,10 @@ jobs:
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
+
+      - name: Create dummy credentials file
+        run: |
+          echo '{"type": "service_account","project_id": "dummy","private_key_id": "dummy","private_key": "dummy","client_email": "dummy@dummy.iam.gserviceaccount.com","client_id": "dummy","auth_uri": "https://accounts.google.com/o/oauth2/auth","token_uri": "https://oauth2.googleapis.com/token","auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs","client_x509_cert_url": "dummy"}' > dummy-credentials.json
 
       - name: Sort imports
         run: isort .
