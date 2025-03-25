@@ -442,13 +442,19 @@ async def process_follow_event(
         line_user_id = event.source.user_id
         logger.info(f"Processing new follower: {line_user_id}")
 
+        # Check if user exists before creating/updating
+        users_collection = collections[0]
+        existing_user = await users_collection.find_one({"line_user_id": line_user_id})
+
         await create_or_update_user(line_user_id, collections)
 
-        welcome_message = (
-            "ようこそ！マンションウォッチへ！\n"
-            "SUUMOの物件URLを送っていただければ、情報を取得します。"
-        )
-        await send_push_message(line_user_id, welcome_message)
+        # Only send welcome message to new users
+        if not existing_user:
+            welcome_message = (
+                "ようこそ！マンションウォッチへ！\n"
+                "SUUMOの物件URLを送っていただければ、情報を取得します。"
+            )
+            await send_push_message(line_user_id, welcome_message)
 
     except Exception as e:
         logger.error(f"Error processing follow event: {str(e)}")

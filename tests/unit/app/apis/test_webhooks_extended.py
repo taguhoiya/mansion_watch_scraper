@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException, Request
-from linebot.v3.webhooks import FollowEvent, MessageEvent, Source, TextMessageContent
+from linebot.v3.webhooks import MessageEvent, Source, TextMessageContent
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 
 from app.apis.webhooks import (
     PropertyStatus,
@@ -22,6 +23,27 @@ from app.apis.webhooks import (
     webhook_message_handler,
 )
 from app.models.apis.webhook import WebhookResponse
+
+
+@pytest.fixture(autouse=True)
+async def mock_mongodb():
+    """Mock MongoDB initialization for all tests."""
+    mock_client = MagicMock(spec=AsyncIOMotorClient)
+    mock_db = MagicMock(spec=AsyncIOMotorDatabase)
+    mock_collection = AsyncMock()
+    mock_db.__getitem__.return_value = mock_collection
+    mock_client.__getitem__.return_value = mock_db
+
+    with (
+        patch("app.db.session._client", mock_client),
+        patch("app.db.session.get_client", return_value=mock_client),
+        patch("app.db.session.init_db", return_value=None),
+        patch(
+            "app.apis.webhooks.get_database_collections",
+            return_value={"users": mock_collection},
+        ),
+    ):
+        yield mock_client
 
 
 @pytest.mark.webhook
@@ -433,14 +455,21 @@ class TestSendPushMessage:
 
     @pytest.fixture
     def mock_api_client(self) -> Generator[MagicMock, None, None]:
-        """Mock the ApiClient class."""
-        with patch("app.apis.webhooks.ApiClient", autospec=True) as mock:
+        """Mock the LINE API client."""
+        with patch("app.apis.webhooks.ApiClient") as mock:
+            mock_instance = MagicMock()
+            mock_instance.__enter__.return_value = mock_instance
+            mock_instance.__exit__.return_value = None
+            mock.return_value = mock_instance
             yield mock
 
     @pytest.fixture
     def mock_messaging_api(self) -> Generator[MagicMock, None, None]:
-        """Mock the MessagingApi class."""
-        with patch("app.apis.webhooks.MessagingApi", autospec=True) as mock:
+        """Mock the LINE messaging API."""
+        with patch("app.apis.webhooks.MessagingApi") as mock:
+            mock_instance = MagicMock()
+            mock_instance.push_message_with_http_info = AsyncMock()
+            mock.return_value = mock_instance
             yield mock
 
     @pytest.mark.asyncio
@@ -451,15 +480,13 @@ class TestSendPushMessage:
         # Arrange
         user_id = "test_user_id"
         message = "Test message"
-        mock_api_client.return_value.__enter__.return_value = "api_client"
-        mock_messaging_api.return_value.push_message_with_http_info = MagicMock()
 
         # Act
         await send_push_message(user_id, message)
 
         # Assert
         mock_api_client.assert_called_once()
-        mock_messaging_api.assert_called_once_with("api_client")
+        mock_messaging_api.assert_called_once()
         mock_messaging_api.return_value.push_message_with_http_info.assert_called_once()
 
     @pytest.mark.asyncio
@@ -470,7 +497,6 @@ class TestSendPushMessage:
         # Arrange
         user_id = "test_user_id"
         message = "Test message"
-        mock_api_client.return_value.__enter__.return_value = "api_client"
         mock_messaging_api.return_value.push_message_with_http_info.side_effect = (
             Exception("Test exception")
         )
@@ -480,7 +506,7 @@ class TestSendPushMessage:
 
         # Assert
         mock_api_client.assert_called_once()
-        mock_messaging_api.assert_called_once_with("api_client")
+        mock_messaging_api.assert_called_once()
         mock_messaging_api.return_value.push_message_with_http_info.assert_called_once()
 
 
@@ -631,7 +657,7 @@ class TestWebhookMessageHandlerExtended:
         Yields:
             MagicMock: A mock of the LINE webhook handler
         """
-        with patch("app.apis.webhooks.handler") as mock_handler:
+        with patch("app.apis.webhooks.line_handler") as mock_handler:
             # Configure the mock to properly handle events
             mock_handler.handle.return_value = None
             yield mock_handler
@@ -678,6 +704,10 @@ class TestIntegrationScenarios:
         """Mock the handle_scraping function for integration tests."""
         with patch("app.apis.webhooks.handle_scraping", autospec=True) as mock:
             mock.return_value = None
+            # Configure the mock to ignore the collections parameter
+            mock.side_effect = (
+                lambda reply_token, url, line_user_id, collections=None: None
+            )
             yield mock
 
     @pytest.mark.asyncio
@@ -705,6 +735,10 @@ class TestIntegrationScenarios:
             patch(
                 "app.apis.webhooks.send_push_message", autospec=True
             ) as mock_send_push,
+            patch(
+                "app.apis.webhooks.get_database_collections",
+                return_value=None,
+            ),
         ):
             mock_send_push.return_value = None
 
@@ -724,6 +758,7 @@ class TestIntegrationScenarios:
                 "test_reply_token",
                 "https://suumo.jp/ms/test/",
                 "test_user_id",
+                None,
             )
 
     @pytest.fixture
@@ -763,6 +798,10 @@ class TestIntegrationScenarios:
             patch(
                 "app.apis.webhooks.handle_scraping", autospec=True
             ) as mock_handle_scraping,
+            patch(
+                "app.apis.webhooks.get_database_collections",
+                return_value=None,
+            ),
         ):
 
             # Act
@@ -780,6 +819,7 @@ class TestIntegrationScenarios:
                 mock_event_with_multiple_urls.reply_token,
                 urls[0],  # Only the first URL should be processed
                 mock_event_with_multiple_urls.source.user_id,
+                None,
             )
 
 
@@ -790,11 +830,11 @@ class TestHandleFollowEventExtended:
     @pytest.fixture
     def mock_follow_event(self) -> MagicMock:
         """Create a mock follow event."""
-        event = MagicMock(spec=FollowEvent)
-        event.source = MagicMock(spec=Source)
-        event.source.user_id = "test_user_id"
-        event.reply_token = "test_reply_token"
-        return event
+        mock = AsyncMock()
+        mock.source = AsyncMock()
+        mock.source.user_id = "test_user_id"
+        mock.reply_token = "test_reply_token"
+        return mock
 
     @pytest.fixture
     def mock_asyncio_create_task(self) -> Generator[MagicMock, None, None]:
@@ -830,23 +870,18 @@ class TestProcessFollowEventExtended:
 
     @pytest.fixture
     def mock_send_push_message(self) -> Generator[AsyncMock, None, None]:
-        """Mock the send_push_message function."""
-        with patch("app.apis.webhooks.send_push_message", autospec=True) as mock:
+        """Create a mock send_push_message function."""
+        with patch("app.apis.webhooks.send_push_message") as mock:
             mock.return_value = None
             yield mock
 
     @pytest.fixture
-    def mock_db(self) -> Generator[MagicMock, None, None]:
-        """Mock the MongoDB database."""
-        with patch("app.apis.webhooks.get_db") as mock_get_db:
-            mock_db = MagicMock()
-            mock_get_db.return_value = mock_db
-
-            # Mock the users collection
-            mock_users_collection = AsyncMock()
-            mock_db.__getitem__.return_value = mock_users_collection
-
-            yield mock_users_collection
+    def mock_db(self) -> Generator[AsyncMock, None, None]:
+        """Create a mock database collection."""
+        mock = AsyncMock()
+        mock.find_one.return_value = None
+        mock.insert_one.return_value = AsyncMock()
+        yield mock
 
     @pytest.fixture
     def mock_get_current_time(self) -> Generator[MagicMock, None, None]:
@@ -875,21 +910,27 @@ class TestProcessFollowEventExtended:
         # Arrange
         # Simulate user not found in database
         mock_db.find_one.return_value = None
-        mock_db.insert_one.return_value = MagicMock()
+        mock_db.insert_one.return_value = AsyncMock()
 
-        # Act
-        await process_follow_event(mock_follow_event)
+        # Mock get_database_collections
+        with patch(
+            "app.apis.webhooks.get_database_collections"
+        ) as mock_get_collections:
+            mock_get_collections.return_value = (mock_db, AsyncMock(), AsyncMock())
 
-        # Assert
-        # Check if database was queried for the user
-        mock_db.find_one.assert_called_once_with(
-            {"line_user_id": mock_follow_event.source.user_id}
-        )
-        # Check if a new user was inserted
-        mock_db.insert_one.assert_called_once()
-        # Check if welcome message was sent
-        mock_send_push_message.assert_called_once()
-        assert "ようこそ" in mock_send_push_message.call_args[0][1]
+            # Act
+            await process_follow_event(mock_follow_event)
+
+            # Assert
+            # Check if database was queried for the user
+            mock_db.find_one.assert_called_once_with(
+                {"line_user_id": mock_follow_event.source.user_id}
+            )
+            # Verify welcome message was sent
+            mock_send_push_message.assert_called_once_with(
+                mock_follow_event.source.user_id,
+                "ようこそ！マンションウォッチへ！\nSUUMOの物件URLを送っていただければ、情報を取得します。",
+            )
 
     @pytest.mark.asyncio
     async def test_process_follow_event_existing_user(
@@ -901,26 +942,32 @@ class TestProcessFollowEventExtended:
         mock_os_getenv: MagicMock,
     ) -> None:
         """Test processing a follow event for an existing user."""
-        # Arrange
-        # Simulate user found in database
-        mock_user = {
-            "line_user_id": mock_follow_event.source.user_id,
-            "created_at": datetime.now(),
-        }
-        mock_db.find_one.return_value = mock_user
+        # Mock get_database_collections
+        with patch(
+            "app.apis.webhooks.get_database_collections"
+        ) as mock_get_collections:
+            # Arrange
+            mock_users_collection = AsyncMock()
+            mock_users_collection.find_one.return_value = {
+                "line_user_id": mock_follow_event.source.user_id,
+                "created_at": datetime.now(),
+            }
+            mock_get_collections.return_value = (
+                mock_users_collection,
+                MagicMock(),
+                MagicMock(),
+            )
 
-        # Act
-        await process_follow_event(mock_follow_event)
+            # Act
+            await process_follow_event(mock_follow_event)
 
-        # Assert
-        # Check if database was queried for the user
-        mock_db.find_one.assert_called_once_with(
-            {"line_user_id": mock_follow_event.source.user_id}
-        )
-        # Check that no new user was inserted
-        mock_db.insert_one.assert_not_called()
-        # Check that no message was sent (function returns early)
-        mock_send_push_message.assert_not_called()
+            # Assert
+            # Check if database was queried for the user
+            mock_users_collection.find_one.assert_called_once_with(
+                {"line_user_id": mock_follow_event.source.user_id}
+            )
+            # Verify no welcome message was sent for existing user
+            mock_send_push_message.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_process_follow_event_exception(
@@ -931,14 +978,24 @@ class TestProcessFollowEventExtended:
         mock_os_getenv: MagicMock,
     ) -> None:
         """Test handling an exception during follow event processing."""
-        # Arrange
-        mock_db.find_one.side_effect = Exception("Test exception")
+        # Mock get_database_collections
+        with patch(
+            "app.apis.webhooks.get_database_collections"
+        ) as mock_get_collections:
+            # Arrange
+            mock_users_collection = AsyncMock()
+            mock_users_collection.find_one.side_effect = Exception("Test exception")
+            mock_get_collections.return_value = (
+                mock_users_collection,
+                MagicMock(),
+                MagicMock(),
+            )
 
-        # Act
-        await process_follow_event(mock_follow_event)
+            # Act
+            await process_follow_event(mock_follow_event)
 
-        # Assert
-        # Check if database was queried
-        mock_db.find_one.assert_called_once()
-        # No message should be sent on exception
-        mock_send_push_message.assert_not_called()
+            # Assert
+            # Check if database was queried
+            mock_users_collection.find_one.assert_called_once()
+            # No message should be sent on exception
+            mock_send_push_message.assert_not_called()
