@@ -13,11 +13,11 @@ from pymongo.errors import (
 )
 from pymongo.server_api import ServerApi
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+from app.configs.settings import LOGGING_CONFIG
+from app.db.session import get_client, init_db
+
+# Configure structured logging
+logging.config.dictConfig(LOGGING_CONFIG)
 logger = logging.getLogger(__name__)
 
 # Environment variables
@@ -105,7 +105,9 @@ async def seed_database() -> None:
     await check_environment()
 
     try:
-        client = await get_mongodb_client()
+        # Initialize MongoDB connection
+        await init_db()
+        client = get_client()
         db = client[DB_NAME]
         collections = {
             COLLECTION_PROPERTIES: db[COLLECTION_PROPERTIES],

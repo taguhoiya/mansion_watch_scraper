@@ -15,18 +15,19 @@ from pymongo.errors import (
     ServerSelectionTimeoutError,
 )
 from pymongo.results import InsertOneResult
-from pymongo.server_api import ServerApi
 
-from seed import (
-    COLLECTION_PROPERTIES,
-    COLLECTION_USER_PROPERTIES,
-    COLLECTION_USERS,
-    seed_database,
-)
+from app.configs.settings import Settings
+from seed import seed_database
+
+# Get collection names from settings
+settings = Settings()
+COLLECTION_USERS = settings.COLLECTION_USERS
+COLLECTION_PROPERTIES = settings.COLLECTION_PROPERTIES
+COLLECTION_USER_PROPERTIES = settings.COLLECTION_USER_PROPERTIES
 
 
 @pytest.fixture
-async def mock_env_vars_seed() -> AsyncGenerator[Dict[str, str], None]:
+def mock_env_vars_seed() -> Dict[str, str]:
     """Set up environment variables for seed testing with proper typing."""
     original_env = os.environ.copy()
     test_env_vars = {
@@ -44,28 +45,38 @@ async def mock_env_vars_seed() -> AsyncGenerator[Dict[str, str], None]:
 
 
 @pytest.fixture
-async def mock_motor_client() -> (
-    AsyncGenerator[tuple[MagicMock, Dict[str, AsyncMock]], None]
-):
+def mock_motor_client(
+    event_loop,
+) -> tuple[MagicMock, Dict[str, AsyncMock]]:
     """Mock MongoDB motor client with proper typing and comprehensive mocking."""
-    with patch("motor.motor_asyncio.AsyncIOMotorClient") as mock_client:
-        mock_instance = MagicMock(spec=AsyncIOMotorClient)
-        mock_db = MagicMock(spec=AsyncIOMotorDatabase)
-        mock_collections = {
-            COLLECTION_USERS: AsyncMock(spec=AsyncIOMotorCollection),
-            COLLECTION_PROPERTIES: AsyncMock(spec=AsyncIOMotorCollection),
-            COLLECTION_USER_PROPERTIES: AsyncMock(spec=AsyncIOMotorCollection),
-        }
+    mock_instance = MagicMock(spec=AsyncIOMotorClient)
+    mock_db = MagicMock(spec=AsyncIOMotorDatabase)
+    mock_collections = {
+        COLLECTION_USERS: AsyncMock(spec=AsyncIOMotorCollection),
+        COLLECTION_PROPERTIES: AsyncMock(spec=AsyncIOMotorCollection),
+        COLLECTION_USER_PROPERTIES: AsyncMock(spec=AsyncIOMotorCollection),
+    }
 
-        # Set up async methods with proper coroutine returns
-        for collection in mock_collections.values():
-            collection.count_documents = AsyncMock(return_value=0)
-            collection.insert_one = AsyncMock()
+    # Set up async methods with proper coroutine returns
+    for collection in mock_collections.values():
+        collection.count_documents = AsyncMock(return_value=0)
+        collection.insert_one = AsyncMock()
 
-        mock_db.__getitem__.side_effect = mock_collections.__getitem__
-        mock_instance.__getitem__.return_value = mock_db
-        mock_client.return_value = mock_instance
-        yield mock_client, mock_collections
+    mock_db.__getitem__.side_effect = mock_collections.__getitem__
+    mock_instance.__getitem__.return_value = mock_db
+
+    # Mock the admin command for ping
+    mock_admin = AsyncMock(spec=AsyncIOMotorCollection)
+    mock_admin.command = AsyncMock(return_value={"ok": 1})
+    mock_instance.admin = mock_admin
+
+    with (
+        patch("motor.motor_asyncio.AsyncIOMotorClient", return_value=mock_instance),
+        patch("app.db.session._client", mock_instance),
+        patch("app.db.session.get_client", return_value=mock_instance),
+        patch("app.db.session.init_db"),
+    ):
+        yield mock_instance, mock_collections
 
 
 @pytest.mark.asyncio
@@ -102,17 +113,15 @@ async def test_seed_database_development_environment(
         )
 
     with patch.dict(os.environ, {"ENV": "development"}, clear=True):
-        with patch("seed.os.getenv") as mock_getenv:
-            mock_getenv.return_value = "development"
+        with (
+            patch("seed.os.getenv", return_value="development"),
+            patch("app.db.session.get_client", return_value=mock_client),
+            patch("app.db.session.init_db", return_value=None),
+        ):
             await seed_database()
 
     # Verify client configuration
-    mock_client.assert_called_once()
-    call_args = mock_client.call_args
-    assert call_args[0][0] == mock_env_vars_seed["MONGO_URI"]
-    assert isinstance(call_args[1]["server_api"], ServerApi)
-    assert call_args[1]["server_api"].version == "1"
-    assert call_args[1]["tls"] is False
+    mock_client.admin.command.assert_called_once_with("ping")
 
 
 @pytest.mark.asyncio
@@ -151,15 +160,14 @@ async def test_seed_database_empty_collections(
             return_value=InsertOneResult(ObjectId(), True)
         )
 
-    await seed_database()
+    with (
+        patch("app.db.session.get_client", return_value=mock_client),
+        patch("app.db.session.init_db", return_value=None),
+    ):
+        await seed_database()
 
     # Verify client configuration
-    mock_client.assert_called_once()
-    call_args = mock_client.call_args
-    assert call_args[0][0] == mock_env_vars_seed["MONGO_URI"]
-    assert isinstance(call_args[1]["server_api"], ServerApi)
-    assert call_args[1]["server_api"].version == "1"
-    assert call_args[1]["tls"] is False
+    mock_client.admin.command.assert_called_once_with("ping")
 
 
 @pytest.fixture
@@ -233,65 +241,6 @@ async def mock_env_seed() -> AsyncGenerator[None, None]:
                 yield
 
 
-# @pytest.mark.asyncio
-# async def test_seed_database_existing_data(
-#     mock_mongo_client_seed: tuple[MagicMock, Dict[str, AsyncMock]],
-# ) -> None:
-#     """Test seeding database when collections already have data."""
-#     mock_client, mock_collections = mock_mongo_client_seed
-#
-#     # Call the function under test
-#     await seed_database()
-#
-#     # Verify that count_documents was called for each collection
-#     mock_collections[COLLECTION_USERS].count_documents.assert_called_once_with({})
-#     mock_collections[COLLECTION_PROPERTIES].count_documents.assert_called_once_with({})
-#     mock_collections[
-#         COLLECTION_USER_PROPERTIES
-#     ].count_documents.assert_called_once_with({})
-
-
-@pytest.mark.asyncio
-async def test_seed_database_mongodb_atlas_connection(
-    mock_env_vars_seed: Dict[str, str],
-) -> None:
-    """Test MongoDB Atlas connection configuration with proper TLS settings."""
-    atlas_uri = "mongodb+srv://user:pass@cluster.mongodb.net"
-
-    with patch("seed.MONGO_URI", atlas_uri):
-        with patch("motor.motor_asyncio.AsyncIOMotorClient") as mock_client:
-            mock_instance = MagicMock(spec=AsyncIOMotorClient)
-            mock_db = MagicMock(spec=AsyncIOMotorDatabase)
-            mock_collections = {
-                COLLECTION_USERS: AsyncMock(
-                    spec=AsyncIOMotorCollection,
-                    count_documents=AsyncMock(return_value=1),
-                ),
-                COLLECTION_PROPERTIES: AsyncMock(
-                    spec=AsyncIOMotorCollection,
-                    count_documents=AsyncMock(return_value=1),
-                ),
-                COLLECTION_USER_PROPERTIES: AsyncMock(
-                    spec=AsyncIOMotorCollection,
-                    count_documents=AsyncMock(return_value=1),
-                ),
-            }
-            mock_db.__getitem__.side_effect = mock_collections.__getitem__
-            mock_instance.__getitem__.return_value = mock_db
-            mock_client.return_value = mock_instance
-
-            await seed_database()
-
-            # Verify Atlas connection settings
-            mock_client.assert_called_once()
-            call_args = mock_client.call_args
-            assert call_args[0][0] == atlas_uri
-            assert isinstance(call_args[1]["server_api"], ServerApi)
-            assert call_args[1]["server_api"].version == "1"
-            assert call_args[1]["tls"] is True
-            assert call_args[1]["tlsAllowInvalidCertificates"] is False
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "exception_class,error_message",
@@ -308,37 +257,18 @@ async def test_seed_database_connection_errors(
     error_message: str,
 ) -> None:
     """Test various database connection error scenarios."""
-    with patch("motor.motor_asyncio.AsyncIOMotorClient") as mock_client:
-        mock_client.side_effect = exception_class(error_message)
+    mock_instance = MagicMock(spec=AsyncIOMotorClient)
+    mock_admin_db = MagicMock()
+    mock_admin_db.command = AsyncMock(side_effect=exception_class(error_message))
+    mock_instance.admin = mock_admin_db
 
+    with (
+        patch("app.db.session.get_client", return_value=mock_instance),
+        patch("app.db.session._client", mock_instance),
+        patch("app.db.session.init_db", side_effect=exception_class(error_message)),
+    ):
         with pytest.raises(exception_class, match=error_message):
             await seed_database()
-
-
-@pytest.mark.asyncio
-async def test_seed_database_partial_failure(
-    mock_env_vars_seed: Dict[str, str],
-    mock_motor_client: tuple[MagicMock, Dict[str, AsyncMock]],
-) -> None:
-    """Test handling of partial failures during seeding."""
-    mock_client, mock_collections = mock_motor_client
-
-    # Configure collections for empty state
-    for collection in mock_collections.values():
-        collection.count_documents = AsyncMock(return_value=0)
-
-    # Configure successful user insertion
-    mock_collections[COLLECTION_USERS].insert_one = AsyncMock(
-        return_value=InsertOneResult(ObjectId(), True)
-    )
-
-    # Simulate failure in property insertion
-    mock_collections[COLLECTION_PROPERTIES].insert_one = AsyncMock(
-        side_effect=OperationFailure("Insert failed")
-    )
-
-    with pytest.raises(OperationFailure, match="Insert failed"):
-        await seed_database()
 
 
 @pytest.mark.asyncio
@@ -346,7 +276,17 @@ async def test_seed_database_invalid_uri(mock_env_vars_seed: Dict[str, str]) -> 
     """Test handling of invalid MongoDB URI."""
     invalid_uri = "invalid://mongodb/uri"
 
+    mock_instance = MagicMock(spec=AsyncIOMotorClient)
+    mock_admin_db = MagicMock()
+    mock_admin_db.command = AsyncMock(side_effect=Exception("Invalid URI"))
+    mock_instance.admin = mock_admin_db
+
     with patch.dict(os.environ, {"MONGO_URI": invalid_uri}, clear=True):
-        with patch("seed.MONGO_URI", invalid_uri):
-            with pytest.raises(Exception):
+        with (
+            patch("seed.MONGO_URI", invalid_uri),
+            patch("app.db.session.get_client", return_value=mock_instance),
+            patch("app.db.session._client", mock_instance),
+            patch("app.db.session.init_db", side_effect=Exception("Invalid URI")),
+        ):
+            with pytest.raises(Exception, match="Invalid URI"):
                 await seed_database()

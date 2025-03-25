@@ -21,16 +21,14 @@ COPY mansion_watch_scraper /app/mansion_watch_scraper
 COPY app /app/app
 COPY enums /app/enums
 COPY .env.prod /app/.env
-
-# Create directory for mounted secrets
-RUN mkdir -p /app/secrets
+COPY service-account.json /app/service-account.json
 
 # Set environment variables
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8080
 ENV GRPC_DNS_RESOLVER=native
-ENV GOOGLE_APPLICATION_CREDENTIALS=/app/secrets/service-account.json
+ENV GOOGLE_APPLICATION_CREDENTIALS=/app/service-account.json
 ENV PUBSUB_SUBSCRIPTION=mansion-watch-scraper-sub-push
 ENV PUBSUB_TOPIC=mansion-watch-scraper-topic
 ENV MONGO_URI="mongodb+srv://mansionwatch:mansiondaisuki@mansionwatch.mbt6a.mongodb.net/?retryWrites=true&w=majority&appName=MansionWatch"

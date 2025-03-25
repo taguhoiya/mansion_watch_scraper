@@ -5,6 +5,7 @@ google-cloud-logging  # Only needed if using Pub/Sub
 google-cloud-storage  # For storing images in GCS
 Pillow  # For image processing
 pydantic
+pydantic-settings
 line-bot-sdk
 
 # Optional development dependencies
