@@ -194,6 +194,13 @@ def main():
     # Configure logging
     logging.config.dictConfig(LOGGING_CONFIG)
 
+    # Configure Uvicorn logging to use our structured format
+    uvicorn_logger = logging.getLogger("uvicorn")
+    uvicorn_logger.handlers = []  # Remove default handlers
+    uvicorn_logger.addHandler(
+        logging.getLogger().handlers[0]
+    )  # Use our structured handler
+
     # Start the application
     uvicorn.run(
         "main:app",
@@ -201,6 +208,7 @@ def main():
         port=8080,
         reload=True,
         reload_dirs=["/app"],
+        log_config=None,  # Disable Uvicorn's logging config
     )
 
 
