@@ -29,11 +29,11 @@ DOWNLOAD_DELAY = 0  # No delay for single URL checks
 RANDOMIZE_DOWNLOAD_DELAY = False
 
 # Enable cookies and cookie debugging
-COOKIES_ENABLED = True
+COOKIES_ENABLED = False
 COOKIES_DEBUG = False  # Disable cookie debugging
 
 # Disable Telnet Console (enabled by default)
-# TELNETCONSOLE_ENABLED = False
+TELNETCONSOLE_ENABLED = False
 
 # Override the default request headers:
 # DEFAULT_REQUEST_HEADERS = {
@@ -94,14 +94,8 @@ DOWNLOADER_MIDDLEWARES = {
 
 # Enable or disable extensions
 # See https://docs.scrapy.org/en/latest/topics/extensions.html
-EXTENSIONS = {
-    "scrapy.extensions.telnet.TelnetConsole": None,
-    "scrapy.extensions.memusage.MemoryUsage": None,
-    "scrapy.extensions.logstats.LogStats": None,
-    "scrapy.extensions.corestats.CoreStats": None,
-    "scrapy.extensions.spiderstate.SpiderState": None,
-    "scrapy.extensions.throttle.AutoThrottle": None,
-}
+EXTENSIONS = {}
+EXTENSIONS_BASE = {}
 
 # Disable version display
 VERSIONS_DISPLAY = False
@@ -127,19 +121,35 @@ MONGO_DATABASE = "mansion_watch"
 MONGO_URI = os.getenv("MONGO_URI")
 
 # Configure logging to be minimal
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-LOG_FORMAT = "%(levelname)s: %(message)s"
-LOG_DATEFORMAT = "%H:%M:%S"
+LOG_ENABLED = True
+LOG_LEVEL = "INFO"
+LOG_FORMAT = '{"time": "%(asctime)s", "severity": "%(levelname)s", "message": "%(message)s", "logging.googleapis.com/sourceLocation": {"file": "%(pathname)s", "line": %(lineno)d, "function": "%(funcName)s"}}'
+LOG_DATEFORMAT = "%Y-%m-%d %H:%M:%S,000"
 LOG_SHORT_NAMES = True
 LOG_STDOUT = False
-LOG_ENABLED = True  # Enable Scrapy's logging but control it through LOG_LEVEL
+LOG_FILE = None
 
-# Disable various logging
-LOG_SPIDER_OPENED = False  # Don't log when spider is opened
-LOG_SPIDER_CLOSED = False  # Don't log when spider is closed
-LOG_SCRAPED_ITEMS = False  # Don't log scraped items
-LOG_STATS = False  # Don't log stats
-LOG_DUPEFILTER = False  # Don't log filtered duplicate requests
+# Disable only unnecessary logging options
+LOG_SPIDER_OPENED = True  # Enable to see spider start/finish
+LOG_SPIDER_CLOSED = True
+LOG_SCRAPED_ITEMS = False
+LOG_UNSCRAPED_ITEMS = False
+LOG_DUPLICATE_FILTER = False
+LOG_STATS = False
+LOG_START_HANDLER = False
+VERSIONS_DISPLAY = False
+ADDONS_DISPLAY = False
+COMMANDS_MODULE = None
+
+# Disable feed exports
+FEED_EXPORT_ENABLED = False
+FEED_STORAGES = {}
+FEED_EXPORTERS = {}
+FEED_EXPORT_BATCH_ITEM_COUNT = 0
+
+# Disable specific debug logs
+ITEM_SCRAPED_DEBUG = False
+ITEM_SCRAPED_INFO = False
 
 # Set the images store
 IMAGES_STORE = os.getenv("IMAGES_STORE")
