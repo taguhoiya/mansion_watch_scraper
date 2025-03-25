@@ -27,6 +27,10 @@ scrape: ## Run the scraper. Usage: make scrape url="https://example.com"
 ngrok: ## Start ngrok.
 	ngrok http http://localhost:8080
 
+.PHONY: pingy
+pingy: ## Start pinggy.
+	ssh -p 443 -R0:localhost:8080 a.pinggy.io
+
 .PHONY: test
 test: ## Run the tests.
 	python -W ignore -m pytest tests/unit/ -v

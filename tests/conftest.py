@@ -11,19 +11,24 @@ from motor.motor_asyncio import (
     AsyncIOMotorDatabase,
 )
 
+from app.configs.settings import settings
+
 
 @pytest.fixture(scope="session")
-def event_loop_policy() -> asyncio.AbstractEventLoopPolicy:
-    """
-    Return an event loop policy with a new event loop for each test.
+def anyio_backend():
+    """Return the backend to use for anyio."""
+    return "asyncio"
 
-    This fixture ensures proper isolation between tests by providing
-    a fresh event loop for each test function.
 
-    Returns:
-        asyncio.AbstractEventLoopPolicy: The current event loop policy
-    """
-    return asyncio.get_event_loop_policy()
+@pytest.fixture(scope="function")
+async def event_loop():
+    """Create an instance of the default event loop for each test case."""
+    policy = asyncio.get_event_loop_policy()
+    loop = policy.new_event_loop()
+    asyncio.set_event_loop(loop)
+    yield loop
+    loop.close()
+    asyncio.set_event_loop(None)
 
 
 @pytest.fixture(autouse=True)
@@ -54,20 +59,30 @@ def suppress_await_warnings() -> Generator[None, None, None]:
 
 
 @pytest.fixture
-def mock_mongo_client() -> Generator[MagicMock, None, None]:
-    """
-    Mock MongoDB client for testing database interactions.
+def mock_motor_client(event_loop):
+    """Create a mock AsyncIOMotorClient with comprehensive mocking."""
+    mock_client = MagicMock(spec=AsyncIOMotorClient)
+    mock_db = MagicMock(spec=AsyncIOMotorDatabase)
+    mock_collections = {
+        settings.COLLECTION_USERS: AsyncMock(
+            spec=AsyncIOMotorCollection,
+            count_documents=AsyncMock(return_value=0),
+        ),
+        settings.COLLECTION_PROPERTIES: AsyncMock(
+            spec=AsyncIOMotorCollection,
+            count_documents=AsyncMock(return_value=0),
+        ),
+        settings.COLLECTION_USER_PROPERTIES: AsyncMock(
+            spec=AsyncIOMotorCollection,
+            count_documents=AsyncMock(return_value=0),
+        ),
+    }
+    mock_db.__getitem__.side_effect = mock_collections.__getitem__
+    mock_client.__getitem__.return_value = mock_db
+    mock_client.admin.command = AsyncMock(return_value={"ok": 1})
 
-    This fixture patches the AsyncIOMotorClient to avoid actual database
-    connections during tests.
-
-    Yields:
-        MagicMock: A mock of the AsyncIOMotorClient
-    """
-    with patch("app.db.session.AsyncIOMotorClient") as mock_client:
-        mock_instance = MagicMock(spec=AsyncIOMotorClient)
-        mock_client.return_value = mock_instance
-        yield mock_client
+    with patch("motor.motor_asyncio.AsyncIOMotorClient", return_value=mock_client):
+        yield mock_client, mock_collections
 
 
 @pytest.fixture
