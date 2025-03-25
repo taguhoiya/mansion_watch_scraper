@@ -156,3 +156,17 @@ def mock_google_cloud_storage():
         mock_client = MagicMock()
         mock.return_value = mock_client
         yield mock_client
+
+
+@pytest.fixture(autouse=True)
+def mock_gcp_credentials():
+    """Mock Google Cloud credentials for all tests."""
+    with patch.dict(
+        os.environ,
+        {
+            "GOOGLE_APPLICATION_CREDENTIALS": "dummy-credentials.json",
+            "GCP_PROJECT_ID": "dummy-project",
+            "PUBSUB_TOPIC": "dummy-topic",
+        },
+    ):
+        yield

@@ -86,6 +86,7 @@ async def queue_scraping(request: ScrapeRequest) -> Dict[str, str]:
         try:
             message_id = future.result(timeout=30)  # 30 seconds timeout
         except futures.TimeoutError:
+            logger.error("Timeout while publishing message")
             raise HTTPException(
                 status_code=status.HTTP_504_GATEWAY_TIMEOUT,
                 detail="Timeout while publishing message",
@@ -100,6 +101,9 @@ async def queue_scraping(request: ScrapeRequest) -> Dict[str, str]:
             "message": "Scraping request has been queued",
             "message_id": message_id,
         }
+
+    except HTTPException:
+        raise
 
     except Exception as e:
         logger.error(f"Error publishing message: {str(e)}")
