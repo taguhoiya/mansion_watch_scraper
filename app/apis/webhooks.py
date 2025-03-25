@@ -19,7 +19,7 @@ from linebot.v3.messaging import TextMessage as TextMessageSend
 from linebot.v3.webhooks import FollowEvent, MessageEvent
 from linebot.v3.webhooks.models.text_message_content import TextMessageContent
 
-from app.apis.scrape import start_scrapy
+from app.apis.scrape import ScrapeRequest, queue_scraping
 from app.db.session import get_db
 from app.models.apis.webhook import WebhookResponse
 from app.services.dates import get_current_time
@@ -267,25 +267,6 @@ async def get_property_status(url: str, line_user_id: str) -> PropertyStatus:
     )
 
 
-async def run_scraping(url: str, line_user_id: str) -> None:
-    """Run scraping process and handle errors."""
-    try:
-        result = await start_scrapy(url=url, line_user_id=line_user_id)
-        if not isinstance(result, dict) or result.get("status") != "not_found":
-            return
-
-        logger.info(f"Property not found for URL: {url}")
-        await send_push_message(
-            line_user_id,
-            "指定された物件は見つかりませんでした。URLが正しいか、または物件が削除されていないか確認してください。",
-        )
-    except Exception as e:
-        logger.error(f"Error in scraping process: {str(e)}")
-        await send_push_message(
-            line_user_id, "申し訳ありません。リクエストの処理中にエラーが発生しました。"
-        )
-
-
 async def handle_scraping(reply_token: str, url: str, line_user_id: str) -> None:
     """Handle property scraping and user notification process."""
     if not url or not line_user_id:
@@ -294,103 +275,70 @@ async def handle_scraping(reply_token: str, url: str, line_user_id: str) -> None
 
     try:
         property_status = await get_property_status(url, line_user_id)
-
-        if property_status.user_has_access:
-            # User already has access, send appropriate message
-            await send_reply(
-                reply_token,
-                "この物件は既にウォッチリストに追加されています！\n左下のメニューからご確認ください😊",
-            )
-            return
-
-        # Send success message before any potential errors
-        await send_reply(
-            reply_token,
-            "ウォッチリストに追加されました！\n左下のメニューからご確認ください😊\n(反映には1分ほどかかる場合があります)",
-        )
-
-        if not property_status.exists:
-            try:
-                result = await run_scraping(url, line_user_id)
-                if isinstance(result, dict) and result.get("status") == "not_found":
-                    await send_push_message(
-                        line_user_id,
-                        "指定された物件は見つかりませんでした。URLが正しいか、または物件が削除されていないか確認してください。",
-                    )
-            except Exception as e:
-                logger.error(f"Error in scraping process: {str(e)}")
-                await send_push_message(
-                    line_user_id,
-                    "申し訳ありません。スクレイピング中にエラーが発生しました。",
-                )
+        await handle_property_status(reply_token, url, line_user_id, property_status)
     except Exception as e:
         logger.error(f"Error in handle_scraping: {str(e)}")
-        # Don't send reply message here since we already sent the success message
         await send_push_message(
             line_user_id,
-            "申し訳ありません。リクエストの処理中にエラーが発生しました。",
+            "申し訳ありません。リクエストの処理中にエラーが発生しました。後でもう一度お試しください。",
         )
 
 
-async def handle_scraping_error(line_user_id: str, error_message: str) -> None:
-    """
-    Handle scraping errors and send appropriate error messages to the user.
+async def handle_property_status(
+    reply_token: str, url: str, line_user_id: str, property_status: PropertyStatus
+) -> None:
+    """Handle property based on its status."""
+    if property_status.user_has_access:
+        await send_reply(
+            reply_token,
+            "この物件は既にウォッチリストに追加されています！\n左下のメニューからご確認ください😊",
+        )
+        return
 
-    Args:
-        line_user_id: The LINE user ID
-        error_message: The error message from the scraper
-    """
-    if (
-        "HTTP Status Code: 404" in error_message
-        or "Property not found (404)" in error_message
-    ):
+    await send_reply(
+        reply_token,
+        "ウォッチリストに追加されました！\n左下のメニューからご確認ください😊\n(反映には1分ほどかかる場合があります)",
+    )
+    logger.info(f"Property status: {property_status}")
+
+    if not property_status.exists:
+        await handle_new_property(url, line_user_id)
+
+
+async def handle_new_property(url: str, line_user_id: str) -> None:
+    """Handle scraping of a new property."""
+    try:
+        scrape_request = ScrapeRequest(url=url, line_user_id=line_user_id)
+        result = await queue_scraping(scrape_request)
+
+        if result.get("status") != "queued":
+            await send_error_message(line_user_id)
+
+    except HTTPException as e:
+        await handle_http_exception(e, line_user_id)
+    except Exception as e:
+        logger.error(f"Error in scraping process: {str(e)}")
+        await send_error_message(line_user_id)
+
+
+async def handle_http_exception(e: HTTPException, line_user_id: str) -> None:
+    """Handle HTTP exceptions during scraping."""
+    logger.error(f"Error in scraping process: {str(e)}")
+    if e.status_code == 404 or "Property not found" in str(e):
         await send_push_message(
             line_user_id,
-            "申し訳ありません。指定された物件は見つかりませんでした。URLが正しいか、または物件が削除されていないか確認してください。",
-        )
-    elif "HTTP Status Code: 403" in error_message:
-        await send_push_message(
-            line_user_id,
-            "申し訳ありません。アクセスが拒否されました。しばらく時間をおいてから再度お試しください。",
-        )
-    elif "HTTP Status Code: 500" in error_message:
-        await send_push_message(
-            line_user_id,
-            "申し訳ありません。物件サイトでエラーが発生しています。しばらく時間をおいてから再度お試しください。",
-        )
-    elif "HttpError on" in error_message:
-        await send_push_message(
-            line_user_id,
-            "申し訳ありません。指定されたURLにアクセスできませんでした。URLが正しいか確認してください。",
-        )
-    elif "Property name not found" in error_message:
-        await send_push_message(
-            line_user_id,
-            "申し訳ありません。スクレイピング中にエラーが発生しました。後でもう一度お試しください。",
-        )
-    elif (
-        "ValidationError" in error_message
-        or "pydantic_core._pydantic_core.ValidationError" in error_message
-    ):
-        await send_push_message(
-            line_user_id,
-            "申し訳ありません。スクレイピング中にエラーが発生しました。後でもう一度お試しください。",
-        )
-    elif "DNSLookupError" in error_message:
-        await send_push_message(
-            line_user_id,
-            "申し訳ありません。ドメイン名を解決できませんでした。インターネット接続を確認してください。",
-        )
-    elif "TimeoutError" in error_message:
-        await send_push_message(
-            line_user_id,
-            "申し訳ありません。リクエストがタイムアウトしました。サーバーが混雑している可能性があります。後でもう一度お試しください。",
+            "指定された物件は見つかりませんでした。URLが正しいか、または物件が削除されていないか確認してください。",
         )
     else:
-        await send_push_message(
-            line_user_id,
-            "スクレイピング中にエラーが発生しました。後でもう一度お試しください。",
-        )
+        await send_error_message(line_user_id)
+
+
+async def send_error_message(line_user_id: str) -> None:
+    """Send a generic error message to the user."""
+    await send_push_message(
+        line_user_id,
+        "申し訳ありません。リクエストの処理中にエラーが発生しました。後でもう一度お試しください。",
+    )
 
 
 def extract_urls(text: str) -> list[str]:
