@@ -421,7 +421,6 @@ def _run_spider_process(
                 "LOG_STATS": False,
                 "LOG_DUPEFILTER": False,
                 "STATS_DUMP": False,
-                "LOG_FORMATTER": "mansion_watch_scraper.utils.log.NoDebugLogFormatter",
                 # Disable unnecessary extensions
                 "EXTENSIONS": {
                     "scrapy.extensions.logstats.LogStats": None,

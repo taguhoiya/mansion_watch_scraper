@@ -60,9 +60,6 @@ def get_callback(future: futures.Future, message_id: str) -> None:
     def callback(future: futures.Future) -> None:
         try:
             future.result()
-            logger.warning(
-                f"Published message {message_id} successfully"
-            )  # Changed to warning
         except Exception as e:
             logger.error(f"Publishing message {message_id} failed: {e}")
 
@@ -96,7 +93,6 @@ async def queue_scraping(request: ScrapeRequest) -> Dict[str, str]:
 
         # Publish message with callback
         future = publisher.publish(topic_path, data=message_data)
-        logger.info(f"Published message {future} for URL: {request.url}")
 
         # Get message ID synchronously
         try:

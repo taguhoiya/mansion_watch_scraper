@@ -338,13 +338,6 @@ class TestProcessTextMessage:
         """Mock database collections."""
         return (AsyncMock(), AsyncMock(), AsyncMock())
 
-    @pytest.fixture
-    def mock_get_database_collections(self, mock_collections) -> AsyncMock:
-        """Mock get_database_collections."""
-        mock_get_db = AsyncMock()
-        mock_get_db.return_value = mock_collections
-        return mock_get_db
-
     @pytest.mark.asyncio
     async def test_process_text_message_with_valid_url(
         self,
@@ -360,6 +353,7 @@ class TestProcessTextMessage:
             mock_event: Mock MessageEvent
             mock_collections: Mock database collections
         """
+        test_id = ObjectId("123456789012345678901234")
         with (
             patch(
                 "app.apis.webhooks.extract_suumo_url",
@@ -369,6 +363,12 @@ class TestProcessTextMessage:
             patch(
                 "app.apis.webhooks.get_database_collections",
                 return_value=mock_collections,
+            ),
+            patch(
+                "app.apis.webhooks.get_property_status",
+                return_value=PropertyStatus(
+                    exists=True, user_has_access=False, property_id=test_id
+                ),
             ),
         ):
             mock_handle_scraping.return_value = asyncio.Future()
@@ -612,10 +612,11 @@ class TestPropertyStatus:
         assert status.property_id is None
 
         # Test with all parameters
-        status = PropertyStatus(exists=True, user_has_access=True, property_id="123")
+        test_id = ObjectId("123456789012345678901234")
+        status = PropertyStatus(exists=True, user_has_access=True, property_id=test_id)
         assert status.exists is True
         assert status.user_has_access is True
-        assert status.property_id == "123"
+        assert status.property_id == test_id
 
 
 @pytest.mark.webhook
@@ -670,7 +671,7 @@ class TestGetPropertyStatus:
 
             assert status.exists is True
             assert status.user_has_access is True
-            assert status.property_id == str(test_id)
+            assert status.property_id == test_id
 
     @pytest.mark.asyncio
     async def test_property_exists_user_no_access(
@@ -695,7 +696,7 @@ class TestGetPropertyStatus:
 
             assert status.exists is True
             assert status.user_has_access is False
-            assert status.property_id == str(test_id)
+            assert status.property_id == test_id
 
 
 @pytest.mark.webhook
@@ -729,6 +730,7 @@ class TestHandleScraping:
         reply_token = "test_reply_token"
         url = "https://suumo.jp/ms/mansion/tokyo/sc_shinjuku/"
         line_user_id = "test_user"
+        test_id = ObjectId("123456789012345678901234")
 
         # Configure the mock to raise an exception on the second call
         mock_send_reply.side_effect = [None, Exception("Test error")]
@@ -741,6 +743,12 @@ class TestHandleScraping:
             patch(
                 "app.apis.webhooks.get_database_collections", autospec=True
             ) as mock_get_collections,
+            patch(
+                "app.apis.webhooks.get_property_status",
+                return_value=PropertyStatus(
+                    exists=True, user_has_access=False, property_id=test_id
+                ),
+            ),
         ):
             mock_send_push.return_value = None
             mock_get_collections.return_value = (MagicMock(), MagicMock(), MagicMock())

@@ -37,7 +37,7 @@ line_handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET", ""))
 class PropertyStatus(NamedTuple):
     exists: bool
     user_has_access: bool
-    property_id: Optional[str] = None
+    property_id: Optional[ObjectId] = None
 
 
 class DatabaseProtocol(Protocol):
@@ -46,7 +46,10 @@ class DatabaseProtocol(Protocol):
     async def get_property_status(
         self, url: str, line_user_id: str
     ) -> PropertyStatus: ...
-    async def add_user_property(self, property_id: str, line_user_id: str) -> None: ...
+
+    async def add_user_property(
+        self, property_id: ObjectId, line_user_id: str
+    ) -> None: ...
     async def create_or_update_user(self, line_user_id: str) -> None: ...
 
 
@@ -89,12 +92,12 @@ async def get_property_status(
     return PropertyStatus(
         exists=True,
         user_has_access=has_access,
-        property_id=str(existing_property["_id"]),
+        property_id=existing_property["_id"],
     )
 
 
 async def add_user_property(
-    property_id: str,
+    property_id: ObjectId,
     line_user_id: str,
     collections: tuple[
         AsyncIOMotorCollection, AsyncIOMotorCollection, AsyncIOMotorCollection
@@ -109,7 +112,7 @@ async def add_user_property(
 
     await user_properties_collection.insert_one(
         {
-            "property_id": ObjectId(property_id),
+            "property_id": property_id,
             "line_user_id": line_user_id,
             "created_at": current_time,
             "updated_at": current_time,
@@ -338,7 +341,9 @@ async def handle_property_status(
 async def handle_new_property(url: str, line_user_id: str) -> None:
     """Handle scraping of a new property."""
     try:
-        scrape_request = ScrapeRequest(url=url, line_user_id=line_user_id)
+        scrape_request = ScrapeRequest(
+            url=url, line_user_id=line_user_id, timestamp=get_current_time()
+        )
         result = await queue_scraping(scrape_request)
 
         if result.get("status") != "queued":
@@ -394,33 +399,57 @@ def is_valid_property_url(url: str) -> bool:
 
 
 async def send_reply(reply_token: str, message: str) -> None:
-    """Send a reply message to the user."""
+    """
+    Send a reply message using the LINE Messaging API.
+
+    Args:
+        reply_token (str): The reply token to use
+        message (str): The message to send
+    """
     try:
-        with ApiClient(line_config) as api_client:
-            line_bot_api = MessagingApi(api_client)
-            await line_bot_api.reply_message_with_http_info(
-                ReplyMessageRequest(
-                    reply_token=reply_token,
-                    messages=[TextMessageSend(text=message, type="text")],
-                )
+        api_client = ApiClient(line_config)
+        messaging_api = MessagingApi(api_client)
+        messaging_api.reply_message_with_http_info(
+            ReplyMessageRequest(
+                reply_token=reply_token,
+                messages=[TextMessageSend(text=message, type="text")],
             )
+        )
     except Exception as e:
-        logger.error(f"Error sending reply: {str(e)}")
+        error_msg = "Unknown error"
+        if e is not None:
+            try:
+                error_msg = str(e)
+            except Exception:
+                pass
+        logger.error(f"Error sending reply: {error_msg}")
 
 
 async def send_push_message(user_id: str, message: str) -> None:
-    """Send a push message to the user."""
+    """
+    Send a push message using the LINE Messaging API.
+
+    Args:
+        user_id (str): The user ID to send the message to
+        message (str): The message to send
+    """
     try:
-        with ApiClient(line_config) as api_client:
-            line_bot_api = MessagingApi(api_client)
-            await line_bot_api.push_message_with_http_info(
-                PushMessageRequest(
-                    to=user_id,
-                    messages=[TextMessageSend(text=message, type="text")],
-                )
+        api_client = ApiClient(line_config)
+        messaging_api = MessagingApi(api_client)
+        messaging_api.push_message_with_http_info(
+            PushMessageRequest(
+                to=user_id,
+                messages=[TextMessageSend(text=message, type="text")],
             )
+        )
     except Exception as e:
-        logger.error(f"Error sending push message: {str(e)}")
+        error_msg = "Unknown error"
+        if e is not None:
+            try:
+                error_msg = str(e)
+            except Exception:
+                pass
+        logger.error(f"Error sending push message: {error_msg}")
 
 
 @line_handler.add(FollowEvent)

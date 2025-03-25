@@ -2,7 +2,7 @@ import logging
 from typing import List
 
 from bson import ObjectId
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from app.db.session import get_db
 from app.models.common_overview import CommonOverview
@@ -22,10 +22,21 @@ logger = logging.getLogger(__name__)
 async def get_common_overview(property_id: str):
     """
     Get the common overview information.
+
+    Args:
+        property_id: The ID of the property to get overviews for
     """
+    try:
+        property_id_obj = ObjectId(property_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid property ID: {str(e)}",
+        )
+
     db = get_db()
     coll = db["common_overviews"]
-    found = await coll.find({"property_id": ObjectId(property_id)}).to_list(length=100)
+    found = await coll.find({"property_id": property_id_obj}).to_list(length=100)
     common_overviews = []
     for prop in found:
         prop["_id"] = str(prop["_id"])
