@@ -399,33 +399,57 @@ def is_valid_property_url(url: str) -> bool:
 
 
 async def send_reply(reply_token: str, message: str) -> None:
-    """Send a reply message to the user."""
+    """
+    Send a reply message using the LINE Messaging API.
+
+    Args:
+        reply_token (str): The reply token to use
+        message (str): The message to send
+    """
     try:
-        with ApiClient(line_config) as api_client:
-            line_bot_api = MessagingApi(api_client)
-            line_bot_api.reply_message(
-                ReplyMessageRequest(
-                    reply_token=reply_token,
-                    messages=[TextMessageSend(text=message, type="text")],
-                )
+        api_client = ApiClient(line_config)
+        messaging_api = MessagingApi(api_client)
+        messaging_api.reply_message_with_http_info(
+            ReplyMessageRequest(
+                reply_token=reply_token,
+                messages=[TextMessageSend(text=message, type="text")],
             )
+        )
     except Exception as e:
-        logger.error(f"Error sending reply: {str(e)}")
+        error_msg = "Unknown error"
+        if e is not None:
+            try:
+                error_msg = str(e)
+            except Exception:
+                pass
+        logger.error(f"Error sending reply: {error_msg}")
 
 
 async def send_push_message(user_id: str, message: str) -> None:
-    """Send a push message to the user."""
+    """
+    Send a push message using the LINE Messaging API.
+
+    Args:
+        user_id (str): The user ID to send the message to
+        message (str): The message to send
+    """
     try:
-        with ApiClient(line_config) as api_client:
-            line_bot_api = MessagingApi(api_client)
-            line_bot_api.push_message(
-                PushMessageRequest(
-                    to=user_id,
-                    messages=[TextMessageSend(text=message, type="text")],
-                )
+        api_client = ApiClient(line_config)
+        messaging_api = MessagingApi(api_client)
+        messaging_api.push_message_with_http_info(
+            PushMessageRequest(
+                to=user_id,
+                messages=[TextMessageSend(text=message, type="text")],
             )
+        )
     except Exception as e:
-        logger.error(f"Error sending push message: {str(e)}")
+        error_msg = "Unknown error"
+        if e is not None:
+            try:
+                error_msg = str(e)
+            except Exception:
+                pass
+        logger.error(f"Error sending push message: {error_msg}")
 
 
 @line_handler.add(FollowEvent)
