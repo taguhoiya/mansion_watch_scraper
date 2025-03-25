@@ -1,4 +1,4 @@
-"""Tests for message handling functionality in the LINE bot."""
+"""Tests for message handling functions."""
 
 from typing import Generator
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -15,6 +15,27 @@ from app.apis.webhooks import (
     send_inquiry_response,
     send_invalid_url_response,
 )
+
+
+@pytest.fixture(autouse=True)
+async def mock_mongodb():
+    """Mock MongoDB initialization for all tests."""
+    mock_client = MagicMock()
+    mock_db = MagicMock()
+    mock_collection = AsyncMock()
+    mock_db.__getitem__.return_value = mock_collection
+    mock_client.__getitem__.return_value = mock_db
+
+    with (
+        patch("app.db.session._client", mock_client),
+        patch("app.db.session.get_client", return_value=mock_client),
+        patch("app.db.session.init_db", return_value=None),
+        patch(
+            "app.apis.webhooks.get_database_collections",
+            return_value=(mock_collection, mock_collection, mock_collection),
+        ),
+    ):
+        yield mock_client
 
 
 @pytest.fixture
@@ -211,17 +232,32 @@ class TestProcessTextMessage:
         """Test processing a message with a valid SUUMO URL."""
         # Arrange
         mock_event.message.text = "Check this property: https://suumo.jp/ms/chuko/tokyo/sc_shinjuku/nc_123456/"
-        with patch(
-            "app.apis.webhooks.extract_urls",
-            return_value=["https://suumo.jp/ms/chuko/tokyo/sc_shinjuku/nc_123456/"],
+        with (
+            patch(
+                "app.apis.webhooks.extract_urls",
+                return_value=["https://suumo.jp/ms/chuko/tokyo/sc_shinjuku/nc_123456/"],
+            ) as mock_extract_urls,
+            patch(
+                "app.apis.webhooks.is_valid_property_url", return_value=True
+            ) as mock_is_valid_property_url,
+            patch(
+                "app.apis.webhooks.get_database_collections",
+                return_value=None,
+            ),
         ):
             # Act
             await process_text_message(mock_event)
+
             # Assert
+            mock_extract_urls.assert_called_once_with(mock_event.message.text)
+            mock_is_valid_property_url.assert_called_once_with(
+                "https://suumo.jp/ms/chuko/tokyo/sc_shinjuku/nc_123456/"
+            )
             mock_handle_scraping.assert_called_once_with(
                 "test_reply_token",
                 "https://suumo.jp/ms/chuko/tokyo/sc_shinjuku/nc_123456/",
                 "test_user_id",
+                None,
             )
 
     @pytest.mark.asyncio
@@ -300,20 +336,35 @@ class TestProcessTextMessage:
             "1. https://suumo.jp/ms/chuko/tokyo/sc_shinjuku/nc_123456/\n"
             "2. https://example.com/property/123"
         )
-        with patch(
-            "app.apis.webhooks.extract_urls",
-            return_value=[
-                "https://suumo.jp/ms/chuko/tokyo/sc_shinjuku/nc_123456/",
-                "https://example.com/property/123",
-            ],
+        with (
+            patch(
+                "app.apis.webhooks.extract_urls",
+                return_value=[
+                    "https://suumo.jp/ms/chuko/tokyo/sc_shinjuku/nc_123456/",
+                    "https://example.com/property/123",
+                ],
+            ) as mock_extract_urls,
+            patch(
+                "app.apis.webhooks.is_valid_property_url", return_value=True
+            ) as mock_is_valid_property_url,
+            patch(
+                "app.apis.webhooks.get_database_collections",
+                return_value=None,
+            ),
         ):
             # Act
             await process_text_message(mock_event)
+
             # Assert
+            mock_extract_urls.assert_called_once_with(mock_event.message.text)
+            mock_is_valid_property_url.assert_called_once_with(
+                "https://suumo.jp/ms/chuko/tokyo/sc_shinjuku/nc_123456/"
+            )
             mock_handle_scraping.assert_called_once_with(
                 "test_reply_token",
                 "https://suumo.jp/ms/chuko/tokyo/sc_shinjuku/nc_123456/",
                 "test_user_id",
+                None,
             )
 
     @pytest.mark.asyncio

@@ -724,11 +724,17 @@ class TestHandleScraping:
         # Configure the mock to raise an exception on the second call
         mock_send_reply.side_effect = [None, Exception("Test error")]
 
-        # We need to mock send_push_message
-        with patch(
-            "app.apis.webhooks.send_push_message", autospec=True
-        ) as mock_send_push:
+        # We need to mock send_push_message and get_database_collections
+        with (
+            patch(
+                "app.apis.webhooks.send_push_message", autospec=True
+            ) as mock_send_push,
+            patch(
+                "app.apis.webhooks.get_database_collections", autospec=True
+            ) as mock_get_collections,
+        ):
             mock_send_push.return_value = None
+            mock_get_collections.return_value = (MagicMock(), MagicMock(), MagicMock())
 
             # Also mock the general exception in queue_scraping
             mock_queue_scraping.side_effect = Exception("Test error")

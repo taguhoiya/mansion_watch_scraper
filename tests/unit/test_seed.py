@@ -1,5 +1,5 @@
 import os
-from typing import AsyncGenerator, Dict
+from typing import Any, AsyncGenerator, Dict, Generator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -27,7 +27,7 @@ COLLECTION_USER_PROPERTIES = settings.COLLECTION_USER_PROPERTIES
 
 
 @pytest.fixture
-def mock_env_vars_seed() -> Dict[str, str]:
+def mock_env_vars_seed() -> Generator[Dict[str, str], None, None]:
     """Set up environment variables for seed testing with proper typing."""
     original_env = os.environ.copy()
     test_env_vars = {
@@ -47,7 +47,7 @@ def mock_env_vars_seed() -> Dict[str, str]:
 @pytest.fixture
 def mock_motor_client(
     event_loop,
-) -> tuple[MagicMock, Dict[str, AsyncMock]]:
+) -> Generator[Any, Any, Any]:
     """Mock MongoDB motor client with proper typing and comprehensive mocking."""
     mock_instance = MagicMock(spec=AsyncIOMotorClient)
     mock_db = MagicMock(spec=AsyncIOMotorDatabase)

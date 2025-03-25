@@ -1,7 +1,7 @@
 """Tests for the follow event handling in the webhooks API."""
 
 from typing import Generator
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from linebot.v3.webhooks import FollowEvent, Source
@@ -96,12 +96,26 @@ class TestProcessFollowEvent:
         await process_follow_event(mock_follow_event)
 
         # Assert
-        mock_collection.find_one.assert_called_once_with(
-            {"line_user_id": mock_follow_event.source.user_id}
+        # Check if database was queried for the user twice
+        # Once in process_follow_event and once in create_or_update_user
+        assert mock_collection.find_one.call_count == 2
+        mock_collection.find_one.assert_has_calls(
+            [
+                call({"line_user_id": mock_follow_event.source.user_id}),
+                call({"line_user_id": mock_follow_event.source.user_id}),
+            ]
         )
+
+        # Check if new user was inserted
         mock_collection.insert_one.assert_called_once()
-        mock_send_push_message.assert_called_once()
-        assert "ようこそ" in mock_send_push_message.call_args[0][1]
+        insert_call = mock_collection.insert_one.call_args[0][0]
+        assert insert_call["line_user_id"] == mock_follow_event.source.user_id
+
+        # Check if welcome message was sent
+        mock_send_push_message.assert_called_once_with(
+            mock_follow_event.source.user_id,
+            "ようこそ！マンションウォッチへ！\nSUUMOの物件URLを送っていただければ、情報を取得します。",
+        )
 
     @pytest.mark.asyncio
     async def test_process_follow_event_existing_user(
@@ -122,11 +136,21 @@ class TestProcessFollowEvent:
         await process_follow_event(mock_follow_event)
 
         # Assert
-        mock_collection.find_one.assert_called_once_with(
-            {"line_user_id": mock_follow_event.source.user_id}
+        # Check if database was queried for the user twice
+        # Once in process_follow_event and once in create_or_update_user
+        assert mock_collection.find_one.call_count == 2
+        mock_collection.find_one.assert_has_calls(
+            [
+                call({"line_user_id": mock_follow_event.source.user_id}),
+                call({"line_user_id": mock_follow_event.source.user_id}),
+            ]
         )
+
+        # Check that no new user was inserted
         mock_collection.insert_one.assert_not_called()
-        mock_send_push_message.assert_not_called()  # No welcome message for existing users
+
+        # Check that no welcome message was sent
+        mock_send_push_message.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_process_follow_event_exception(
