@@ -10,16 +10,28 @@ from pydantic import BaseModel, field_validator
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Initialize Pub/Sub publisher client with batch settings
+# Initialize Pub/Sub settings
 batch_settings = pubsub_v1.types.BatchSettings(
     max_bytes=1024 * 1024, max_latency=1, max_messages=100  # 1 MB  # 1 second
 )
-publisher = pubsub_v1.PublisherClient(batch_settings=batch_settings)
 
-# Get project ID and topic name from environment variables
-project_id = os.getenv("GCP_PROJECT_ID", "daring-night-451212-a8")
-topic_name = os.getenv("PUBSUB_TOPIC", "mansion-watch-scraper-topic")
-topic_path = publisher.topic_path(project_id, topic_name)
+_publisher = None
+
+
+def get_publisher():
+    """Get or create Pub/Sub publisher client with batch settings."""
+    global _publisher
+    if _publisher is None:
+        _publisher = pubsub_v1.PublisherClient(batch_settings=batch_settings)
+    return _publisher
+
+
+def get_topic_path():
+    """Get the full topic path for Pub/Sub."""
+    # Get project ID and topic name from environment variables
+    project_id = os.getenv("GCP_PROJECT_ID", "daring-night-451212-a8")
+    topic_name = os.getenv("PUBSUB_TOPIC", "mansion-watch-scraper-topic")
+    return get_publisher().topic_path(project_id, topic_name)
 
 
 class ScrapeRequest(BaseModel):
@@ -77,6 +89,10 @@ async def queue_scraping(request: ScrapeRequest) -> Dict[str, str]:
         # Prepare message data
         logger.info(f"Publishing message for URL: {request.url}")
         message_data = request.model_dump_json().encode("utf-8")
+
+        # Get publisher and topic path
+        publisher = get_publisher()
+        topic_path = get_topic_path()
 
         # Publish message with callback
         future = publisher.publish(topic_path, data=message_data)

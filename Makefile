@@ -33,11 +33,11 @@ pingy: ## Start pinggy.
 
 .PHONY: test
 test: ## Run the tests.
-	python -W ignore -m pytest tests/unit/ -v
+	GOOGLE_APPLICATION_CREDENTIALS=dummy-credentials.json python -W ignore -m pytest tests/unit/ -v
 
 .PHONY: test-cov
 test-cov: ## Run the tests with coverage report.
-	python -W ignore -m pytest tests/unit/ -v
+	GOOGLE_APPLICATION_CREDENTIALS=dummy-credentials.json python -W ignore -m pytest tests/unit/ -v
 
 .PHONY: test-docker
 test-docker: ## Run the tests in the docker container.

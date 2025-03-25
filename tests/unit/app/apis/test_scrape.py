@@ -40,8 +40,9 @@ class TestQueueScraping:
     @pytest.fixture
     def mock_publisher(self) -> Generator[MagicMock, None, None]:
         """Mock the Pub/Sub publisher."""
-        with patch("app.apis.scrape.publisher") as mock:
-            yield mock
+        mock_publisher = MagicMock()
+        with patch("app.apis.scrape.get_publisher", return_value=mock_publisher) as _:
+            yield mock_publisher
 
     @pytest.mark.asyncio
     async def test_queue_scraping_success(self, mock_publisher: MagicMock) -> None:
