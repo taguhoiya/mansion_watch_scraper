@@ -1,4 +1,3 @@
-import json
 import re
 import urllib.parse
 from datetime import datetime, timedelta
@@ -26,46 +25,6 @@ class MansionWatchSpider(scrapy.Spider):
 
     name = "mansion_watch_scraper"
     allowed_domains = ["suumo.jp"]
-    custom_settings = {
-        "ROBOTSTXT_OBEY": False,
-        "COOKIES_ENABLED": False,
-        "DOWNLOAD_TIMEOUT": 120,
-        "RETRY_ENABLED": True,  # Enable retries
-        "RETRY_TIMES": 3,  # Try up to 3 times
-        "RETRY_HTTP_CODES": [
-            500,
-            502,
-            503,
-            504,
-            408,
-            429,
-        ],  # Retry on these status codes
-        "CONCURRENT_REQUESTS": 1,
-        "DOWNLOAD_DELAY": 0,
-        "CLOSESPIDER_PAGECOUNT": 1,
-        "LOG_ENABLED": True,
-        "LOG_LEVEL": "WARNING",
-        "LOG_STDOUT": False,
-        "LOG_FILE": None,
-        "LOG_SPIDER_OPENED": False,
-        "LOG_SPIDER_CLOSED": False,
-        "LOG_SCRAPED_ITEMS": False,
-        "LOG_STATS": False,
-        "LOG_DUPEFILTER": False,
-        "STATS_DUMP": False,
-        "EXTENSIONS": {},
-        "EXTENSIONS_BASE": {},
-        "TELNETCONSOLE_ENABLED": False,
-        "FEED_EXPORT_ENABLED": False,
-        "FEED_STORAGES": {},
-        "FEED_EXPORTERS": {},
-        "FEED_EXPORT_BATCH_ITEM_COUNT": 0,
-        "LOGSTATS_INTERVAL": 0,
-        "ITEM_PIPELINES": {
-            "mansion_watch_scraper.pipelines.MongoPipeline": 300,
-            "mansion_watch_scraper.pipelines.SuumoImagesPipeline": 1,
-        },
-    }
 
     def __init__(
         self,
@@ -93,14 +52,9 @@ class MansionWatchSpider(scrapy.Spider):
         self.check_only = check_only
         self.results = {}
 
-        # Configure spider settings based on check_only mode
+        # Disable pipelines in check_only mode
         if check_only:
-            self.custom_settings["ITEM_PIPELINES"] = {}
-        else:
-            self.custom_settings["ITEM_PIPELINES"] = {
-                "mansion_watch_scraper.pipelines.MongoPipeline": 300,
-                "mansion_watch_scraper.pipelines.SuumoImagesPipeline": 1,
-            }
+            self.settings.set("ITEM_PIPELINES", {}, priority="spider")
 
     def start_requests(self):
         """Start the scraping requests with error handling."""
@@ -170,10 +124,8 @@ class MansionWatchSpider(scrapy.Spider):
 
             property_item = self._extract_property_info(response)
             if not property_item:
-                self._log_structured(
-                    "error",
-                    "Failed to extract property information",
-                    {"url": response.url},
+                self.logger.error(
+                    f"Failed to extract property information: {response.url}"
                 )
                 return
 
@@ -192,6 +144,8 @@ class MansionWatchSpider(scrapy.Spider):
                 "next_aggregated_at": current_time + timedelta(days=3),
             }
 
+            self.logger.info(f"Successfully scraped property: {property_item.name}")
+
             yield {
                 "properties": property_item.model_dump(),
                 "property_overviews": property_overview,
@@ -201,9 +155,7 @@ class MansionWatchSpider(scrapy.Spider):
             }
 
         except Exception as e:
-            self._log_structured(
-                "error", "Error in parse method", {"url": response.url}, error=e
-            )
+            self.logger.error(f"Error in parse method. url: {response.url}, error: {e}")
             self.results = {
                 "status": "error",
                 "error_type": e.__class__.__name__,
@@ -302,77 +254,6 @@ class MansionWatchSpider(scrapy.Spider):
             else:
                 sanitized_context[key] = value
         return sanitized_context
-
-    def _create_log_data(
-        self,
-        message: str,
-        context: Optional[Dict[str, Any]] = None,
-        error: Optional[Exception] = None,
-    ) -> Dict[str, Any]:
-        """Create structured log data.
-
-        Args:
-            message: Log message
-            context: Context dictionary
-            error: Error object
-        Returns:
-            Structured log data dictionary
-        """
-        log_data = {
-            "message": message,
-            "spider": self.name,
-            "timestamp": datetime.now().isoformat(),
-        }
-
-        if context:
-            log_data["context"] = self._sanitize_context(context)
-
-        if error:
-            log_data["error"] = {
-                "type": error.__class__.__name__,
-                "message": str(error),
-            }
-            if hasattr(error, "__traceback__"):
-                import traceback
-
-                log_data["error"]["traceback"] = traceback.format_exc()
-
-        return log_data
-
-    def _log_structured(
-        self,
-        level: str,
-        message: str,
-        context: Optional[Dict[str, Any]] = None,
-        error: Optional[Exception] = None,
-    ) -> None:
-        """Log a structured message with context.
-
-        Args:
-            level: Log level (info, warning, error)
-            message: Main log message
-            context: Additional context as dictionary
-            error: Exception object if logging an error
-        """
-        # First, log the message in the expected format for tests
-        if context and "url" in context and level == "error":
-            self._log_http_error(level, context, error)
-
-        # Then create and log the structured message
-        try:
-            log_data = self._create_log_data(message, context, error)
-            log_message = json.dumps(log_data)
-
-            if level == "info":
-                self.logger.info(log_message)
-            elif level == "warning":
-                self.logger.warning(log_message)
-            elif level == "error":
-                self.logger.error(log_message)
-        except TypeError as e:
-            # Fallback to simple logging if JSON serialization fails
-            self.logger.error(f"Failed to serialize log data: {str(e)}")
-            self.logger.error(message)
 
     def _extract_property_name(self, response: Response) -> Optional[str]:
         """Extract the property name from the response.
@@ -483,10 +364,8 @@ class MansionWatchSpider(scrapy.Spider):
                     content = re.sub(r"\s+", " ", content).strip()
                     return content
 
-        self._log_structured(
-            "warning",
-            "Failed to extract small property description",
-            {"url": response.url, "tried_selectors": selectors},
+        self.logger.warning(
+            f"Failed to extract small property description. url: {response.url}, tried_selectors: {selectors}"
         )
         return None
 
@@ -505,10 +384,8 @@ class MansionWatchSpider(scrapy.Spider):
         )
 
         if is_redirected_to_library:
-            self._log_structured(
-                "info",
-                "Skipping image extraction for sold-out property",
-                {"url": response.url, "original_url": original_url},
+            self.logger.info(
+                f"Skipping image extraction for sold-out property. url: {response.url}, original_url: {original_url}"
             )
             return []
 
@@ -523,20 +400,12 @@ class MansionWatchSpider(scrapy.Spider):
 
         # Step 4: Log results
         if image_urls:
-            self._log_structured(
-                "info",
-                "Successfully extracted image URLs",
-                {
-                    "url": response.url,
-                    "image_count": len(image_urls),
-                    "patterns_used": xpath_patterns,
-                },
+            self.logger.info(
+                f"Successfully extracted image URLs. url: {response.url}, image_count: {len(image_urls)}, patterns_used: {xpath_patterns}"
             )
         else:
-            self._log_structured(
-                "warning",
-                "No image URLs found for active property",
-                {"url": response.url, "patterns_tried": xpath_patterns},
+            self.logger.warning(
+                f"No image URLs found for active property. url: {response.url}, patterns_tried: {xpath_patterns}"
             )
 
         return image_urls
@@ -568,17 +437,12 @@ class MansionWatchSpider(scrapy.Spider):
         for pattern in patterns:
             urls = response.xpath(pattern).getall()
             if urls:
-                self._log_structured(
-                    "info",
-                    "Found images with pattern",
-                    {"pattern": pattern, "url_count": len(urls)},
-                )
                 # Return immediately when we find images
                 # Remove duplicates while preserving order
                 return list(dict.fromkeys(urls))
 
-        self._log_structured(
-            "warning", "No images found with any pattern", {"patterns_tried": patterns}
+        self.logger.warning(
+            f"No images found with any pattern. patterns_tried: {patterns}"
         )
         return []
 
@@ -613,11 +477,8 @@ class MansionWatchSpider(scrapy.Spider):
             # Otherwise, construct the resizeImage URL
             return f"https://img01.suumo.com/jj/resizeImage?src={src_param}"
         except Exception as e:
-            self._log_structured(
-                "error",
-                "Error processing URL from hidden input",
-                {"image_url": image_url},
-                error=e,
+            self.logger.error(
+                f"Error processing URL from hidden input. image_url: {image_url}, error: {e}"
             )
             return None
 
@@ -809,7 +670,7 @@ class MansionWatchSpider(scrapy.Spider):
             url: The URL of the page
         """
         if not property_name:
-            self.logger.error(f"Property name not found in the response. URL: {url}")
+            self.logger.error(f"Property name not found in the response. url: {url}")
             self.logger.error(
                 "This may indicate that the page doesn't contain property information "
                 "or has a different structure."
@@ -833,7 +694,7 @@ class MansionWatchSpider(scrapy.Spider):
         ):
             self.logger.info(
                 f"Detected redirect to library page (likely sold-out property). "
-                f"Original URL: {original_url}, Redirected URL: {response.url}"
+                f"original_url: {original_url}, redirected_url: {response.url}"
             )
             return True
         return False
@@ -931,9 +792,7 @@ class MansionWatchSpider(scrapy.Spider):
             # Extract property name from title
             title = response.xpath("//title/text()").get()
             if not title:
-                self._log_structured(
-                    "error", "Failed to extract title", {"url": response.url}
-                )
+                self.logger.error(f"Failed to extract title: {response.url}")
                 return None
 
             # Extract property name from title (format: "【SUUMO】PropertyName 中古マンション物件情報")
@@ -962,20 +821,16 @@ class MansionWatchSpider(scrapy.Spider):
                 "//h1[contains(@class, 'mainIndex') and (contains(@class, 'mainIndexK') or contains(@class, 'mainIndexR'))]/text()"
             ).get()
             if not price_text:
-                self._log_structured(
-                    "error",
-                    "Failed to extract price from h1 tag",
-                    {"url": response.url},
+                self.logger.error(
+                    f"Failed to extract price from h1 tag. url: {response.url}"
                 )
                 return None
 
             # Extract price value (format: "PropertyName 7880万円（1LDK）")
             price_match = re.search(r"(\d+)万円", price_text)
             if not price_match:
-                self._log_structured(
-                    "error",
-                    "Failed to extract price value",
-                    {"url": response.url, "price_text": price_text},
+                self.logger.error(
+                    f"Failed to extract price value. url: {response.url}, price_text: {price_text}"
                 )
                 return None
 
@@ -986,8 +841,8 @@ class MansionWatchSpider(scrapy.Spider):
                 "//td[preceding-sibling::th/div[contains(text(), '所在地')]]/text()"
             ).get()
             if not address:
-                self._log_structured(
-                    "error", "Failed to extract property address", {"url": response.url}
+                self.logger.error(
+                    f"Failed to extract property address. url: {response.url}"
                 )
                 return None
 
@@ -996,8 +851,8 @@ class MansionWatchSpider(scrapy.Spider):
                 "//td[preceding-sibling::th/div[contains(text(), '専有面積')]]/text()"
             ).get()
             if not size_text:
-                self._log_structured(
-                    "error", "Failed to extract property size", {"url": response.url}
+                self.logger.error(
+                    f"Failed to extract property size. url: {response.url}"
                 )
                 return None
 
@@ -1029,10 +884,13 @@ class MansionWatchSpider(scrapy.Spider):
             return property_obj
 
         except Exception as e:
-            self._log_structured(
-                "error",
-                "Error extracting property info",
-                {"url": response.url},
-                error=e,
+            self.logger.error(
+                f"Error extracting property info. url: {response.url}, error: {e}"
             )
+            self.results = {
+                "status": "error",
+                "error_type": e.__class__.__name__,
+                "error_message": str(e),
+                "url": response.url,
+            }
             return None

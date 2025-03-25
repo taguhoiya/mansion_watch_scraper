@@ -60,7 +60,7 @@ steps:
 substitutions:
   _MONGO_URI: mongodb+srv://mansionwatch:mansiondaisuki@mansionwatch.mbt6a.mongodb.net/?retryWrites=true&w=majority&appName=MansionWatch
   _GCP_PROJECT_ID: daring-night-451212-a8
-  _PUBSUB_TOPIC: mansion-watch-scraper
+  _PUBSUB_TOPIC: mansion-watch-scraper-topic
   _PUBSUB_SUBSCRIPTION: mansion-watch-scraper-sub-push
 
 images:

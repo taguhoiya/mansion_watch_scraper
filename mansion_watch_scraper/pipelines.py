@@ -662,7 +662,7 @@ class SuumoImagesPipeline(ImagesPipeline):
         # Log summary of processed images
         total_images = len(requests)
         self.logger.info(
-            f"Image processing summary for {item.get('properties', {}).get('name', 'Unknown')}:\n"
+            f"Image processing summary for {item.get('properties', {}).get('name', 'Unknown')}: "
             f"Total: {total_images}, Existing: {existing_images}, "
             f"New uploads: {new_uploads}, Failed: {failed_uploads}"
         )
@@ -689,9 +689,6 @@ class SuumoImagesPipeline(ImagesPipeline):
                 import shutil
 
                 shutil.rmtree(tmp_dir)
-                self.logger.info(
-                    f"Cleaned up tmp directory and all contents: {tmp_dir}"
-                )
             return True
         except Exception as e:
             self.logger.error(f"Error cleaning up temporary directory: {e}")

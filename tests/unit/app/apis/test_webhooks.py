@@ -17,7 +17,6 @@ from app.apis.webhooks import (
     is_valid_property_url,
     process_follow_event,
     process_text_message,
-    run_scraping,
     send_reply,
     webhook_message_handler,
 )
@@ -343,24 +342,24 @@ class TestProcessTextMessage:
             yield mock_send_reply
 
     @pytest.fixture
-    def mock_start_scrapy(self) -> Generator[AsyncMock, None, None]:
+    def mock_handle_scraping(self) -> Generator[AsyncMock, None, None]:
         """
-        Mock the start_scrapy function.
+        Mock the handle_scraping function.
 
         Returns:
-            Generator[AsyncMock, None, None]: A mock of the start_scrapy function
+            Generator[AsyncMock, None, None]: A mock of the handle_scraping function
         """
-        with patch("app.apis.webhooks.start_scrapy") as mock_start_scrapy:
-            mock_start_scrapy.return_value = asyncio.Future()
-            mock_start_scrapy.return_value.set_result(None)
-            yield mock_start_scrapy
+        with patch("app.apis.webhooks.handle_scraping") as mock_handle_scraping:
+            mock_handle_scraping.return_value = asyncio.Future()
+            mock_handle_scraping.return_value.set_result(None)
+            yield mock_handle_scraping
 
     @pytest.mark.asyncio
     async def test_process_text_message_with_valid_url(
         self,
         mock_event: MagicMock,
         mock_send_reply: Generator[AsyncMock, None, None],
-        mock_start_scrapy: Generator[AsyncMock, None, None],
+        mock_handle_scraping: Generator[AsyncMock, None, None],
     ) -> None:
         """
         Test processing a message with a valid property URL.
@@ -370,7 +369,7 @@ class TestProcessTextMessage:
         Args:
             mock_event: Mock MessageEvent
             mock_send_reply: Mock of the send_reply function
-            mock_start_scrapy: Mock of the start_scrapy function
+            mock_handle_scraping: Mock of the handle_scraping function
         """
         # Given: We need to mock extract_suumo_url and handle_scraping
         with (
@@ -399,7 +398,7 @@ class TestProcessTextMessage:
         self,
         mock_event: MagicMock,
         mock_send_reply: Generator[AsyncMock, None, None],
-        mock_start_scrapy: Generator[AsyncMock, None, None],
+        mock_handle_scraping: Generator[AsyncMock, None, None],
     ) -> None:
         """
         Test processing a message with no URL.
@@ -409,7 +408,7 @@ class TestProcessTextMessage:
         Args:
             mock_event: Mock MessageEvent
             mock_send_reply: Mock of the send_reply function
-            mock_start_scrapy: Mock of the start_scrapy function
+            mock_handle_scraping: Mock of the handle_scraping function
         """
         # Given: A message with no URL
         mock_event.message.text = "This message has no URL"
@@ -427,7 +426,7 @@ class TestProcessTextMessage:
         self,
         mock_event: MagicMock,
         mock_send_reply: Generator[AsyncMock, None, None],
-        mock_start_scrapy: Generator[AsyncMock, None, None],
+        mock_handle_scraping: Generator[AsyncMock, None, None],
     ) -> None:
         """
         Test processing a message with an invalid URL.
@@ -437,7 +436,7 @@ class TestProcessTextMessage:
         Args:
             mock_event: Mock MessageEvent
             mock_send_reply: Mock of the send_reply function
-            mock_start_scrapy: Mock of the start_scrapy function
+            mock_handle_scraping: Mock of the handle_scraping function
         """
         # Given: A message with an invalid URL
         mock_event.message.text = "Check this: https://example.com/not-a-property"
@@ -455,7 +454,7 @@ class TestProcessTextMessage:
         self,
         mock_event: MagicMock,
         mock_send_reply: Generator[AsyncMock, None, None],
-        mock_start_scrapy: Generator[AsyncMock, None, None],
+        mock_handle_scraping: Generator[AsyncMock, None, None],
     ) -> None:
         """
         Test processing a message when the scraping process fails.
@@ -465,7 +464,7 @@ class TestProcessTextMessage:
         Args:
             mock_event: Mock MessageEvent
             mock_send_reply: Mock of the send_reply function
-            mock_start_scrapy: Mock of the start_scrapy function
+            mock_handle_scraping: Mock of the handle_scraping function
         """
         # Given: We need to mock extract_suumo_url and handle_scraping
         with (
@@ -507,7 +506,7 @@ class TestProcessTextMessage:
     async def test_process_text_message_with_property_name_and_url(
         self,
         mock_send_reply: Generator[AsyncMock, None, None],
-        mock_start_scrapy: Generator[AsyncMock, None, None],
+        mock_handle_scraping: Generator[AsyncMock, None, None],
     ) -> None:
         """
         Test processing a message with a property name and URL.
@@ -516,7 +515,7 @@ class TestProcessTextMessage:
 
         Args:
             mock_send_reply: Mock of the send_reply function
-            mock_start_scrapy: Mock of the start_scrapy function
+            mock_handle_scraping: Mock of the handle_scraping function
         """
         # Given: A message event with a property name and URL
         event = MagicMock(spec=MessageEvent)
@@ -817,142 +816,54 @@ class TestGetPropertyStatus:
 
 
 @pytest.mark.webhook
-class TestRunScraping:
-    """Tests for run_scraping function."""
-
-    @pytest.fixture
-    def mock_start_scrapy(self) -> Generator[AsyncMock, None, None]:
-        """Mock start_scrapy function."""
-        with patch("app.apis.webhooks.start_scrapy") as mock:
-            yield mock
-
-    @pytest.fixture
-    def mock_send_push_message(self) -> Generator[AsyncMock, None, None]:
-        """Mock send_push_message function."""
-        with patch("app.apis.webhooks.send_push_message") as mock:
-            yield mock
-
-    @pytest.mark.asyncio
-    async def test_successful_scraping(self, mock_start_scrapy, mock_send_push_message):
-        """Test successful scraping operation."""
-        mock_start_scrapy.return_value = {"status": "success"}
-
-        await run_scraping("test_url", "test_user")
-
-        mock_start_scrapy.assert_called_once_with(
-            url="test_url", line_user_id="test_user"
-        )
-        mock_send_push_message.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_property_not_found(self, mock_start_scrapy, mock_send_push_message):
-        """Test when property is not found during scraping."""
-        mock_start_scrapy.return_value = {"status": "not_found"}
-
-        await run_scraping("test_url", "test_user")
-
-        mock_send_push_message.assert_called_once()
-        assert "物件は見つかりませんでした" in mock_send_push_message.call_args[0][1]
-
-    @pytest.mark.asyncio
-    async def test_scraping_error(self, mock_start_scrapy, mock_send_push_message):
-        """Test error handling during scraping."""
-        mock_start_scrapy.side_effect = Exception("Scraping error")
-
-        await run_scraping("test_url", "test_user")
-
-        mock_send_push_message.assert_called_once()
-        assert "エラーが発生しました" in mock_send_push_message.call_args[0][1]
-
-
-@pytest.mark.webhook
 class TestHandleScraping:
-    """Tests for the handle_scraping function."""
+    """Test cases for handle_scraping function."""
 
     @pytest.fixture
-    def mock_get_property_status(self) -> Generator[AsyncMock, None, None]:
-        """Mock the get_property_status function."""
-        with patch("app.apis.webhooks.get_property_status", autospec=True) as mock:
-            yield mock
+    def mock_send_reply(self):
+        """Create a mock for send_reply function."""
+        return AsyncMock()
 
     @pytest.fixture
-    def mock_send_reply(self) -> Generator[AsyncMock, None, None]:
-        """Mock the send_reply function."""
-        with patch("app.apis.webhooks.send_reply", autospec=True) as mock:
-            mock.return_value = None
-            yield mock
+    def mock_queue_scraping(self):
+        """Create a mock for queue_scraping function."""
+        return AsyncMock()
 
     @pytest.fixture
-    def mock_run_scraping(self) -> Generator[AsyncMock, None, None]:
-        """Mock the run_scraping function."""
-        with patch("app.apis.webhooks.run_scraping", autospec=True) as mock:
-            mock.return_value = None
-            yield mock
-
-    @pytest.mark.asyncio
-    async def test_missing_parameters(
-        self, mock_get_property_status, mock_send_reply, mock_run_scraping
-    ):
-        """Test handling missing parameters."""
-        await handle_scraping("", "", "")
-        mock_get_property_status.assert_not_called()
-        mock_send_reply.assert_not_called()
-        mock_run_scraping.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_existing_property_user_has_access(
-        self, mock_get_property_status, mock_send_reply, mock_run_scraping
-    ):
-        """Test when user already has access to the property."""
-        mock_get_property_status.return_value = PropertyStatus(
-            exists=True, user_has_access=True, property_id="123"
-        )
-
-        await handle_scraping("reply_token", "test_url", "test_user")
-
-        mock_send_reply.assert_called_once_with(
-            "reply_token",
-            "この物件は既にウォッチリストに追加されています！\n左下のメニューからご確認ください😊",
-        )
-        mock_run_scraping.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_new_property(
-        self, mock_get_property_status, mock_send_reply, mock_run_scraping
-    ):
-        """Test handling a new property."""
-        mock_get_property_status.return_value = PropertyStatus(
-            exists=False, user_has_access=False
-        )
-
-        await handle_scraping("reply_token", "test_url", "test_user")
-
-        mock_send_reply.assert_called_once_with(
-            "reply_token",
-            "ウォッチリストに追加されました！\n左下のメニューからご確認ください😊\n(反映には1分ほどかかる場合があります)",
-        )
-        mock_run_scraping.assert_called_once_with("test_url", "test_user")
+    def mock_get_property_status(self):
+        """Create a mock for get_property_status function."""
+        return AsyncMock()
 
     @pytest.mark.asyncio
     async def test_error_handling(
-        self, mock_get_property_status, mock_send_reply, mock_run_scraping
+        self,
+        mock_send_reply,
+        mock_queue_scraping,
+        mock_get_property_status,
     ):
         """Test error handling in handle_scraping."""
-        # Mock get_property_status to raise an exception
-        mock_get_property_status.side_effect = Exception("Database error")
+        # Arrange
+        reply_token = "test_reply_token"
+        url = "https://suumo.jp/ms/mansion/tokyo/sc_shinjuku/"
+        line_user_id = "test_user"
 
-        # Mock send_push_message
+        # Configure the mock to raise an exception on the second call
+        mock_send_reply.side_effect = [None, Exception("Test error")]
+
+        # We need to mock send_push_message
         with patch(
             "app.apis.webhooks.send_push_message", autospec=True
         ) as mock_send_push:
             mock_send_push.return_value = None
 
+            # Also mock the general exception in queue_scraping
+            mock_queue_scraping.side_effect = Exception("Test error")
+
             # Act
-            await handle_scraping("reply_token", "test_url", "test_user")
+            await handle_scraping(reply_token, url, line_user_id)
 
             # Assert
             mock_send_push.assert_called_once_with(
-                "test_user",
-                "申し訳ありません。リクエストの処理中にエラーが発生しました。",
+                line_user_id,
+                "申し訳ありません。リクエストの処理中にエラーが発生しました。後でもう一度お試しください。",
             )
-            mock_run_scraping.assert_not_called()

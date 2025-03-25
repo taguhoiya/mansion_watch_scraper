@@ -13,8 +13,8 @@ from app.apis.webhooks import (
     PropertyStatus,
     extract_urls,
     handle_follow_event,
+    handle_http_exception,
     handle_scraping,
-    handle_scraping_error,
     is_valid_property_url,
     process_follow_event,
     process_text_message,
@@ -36,10 +36,13 @@ class TestHandleScrapingFunction:
             yield mock
 
     @pytest.fixture
-    def mock_start_scrapy(self) -> Generator[AsyncMock, None, None]:
-        """Mock the start_scrapy function."""
-        with patch("app.apis.webhooks.start_scrapy", autospec=True) as mock:
-            mock.return_value = None
+    def mock_queue_scraping(self) -> Generator[AsyncMock, None, None]:
+        """Mock the queue_scraping function."""
+        with patch("app.apis.webhooks.queue_scraping", autospec=True) as mock:
+            mock.return_value = {
+                "status": "queued",
+                "message": "Scraping request has been queued",
+            }
             yield mock
 
     @pytest.fixture
@@ -53,14 +56,14 @@ class TestHandleScrapingFunction:
     async def test_handle_scraping_success(
         self,
         mock_send_reply: AsyncMock,
-        mock_start_scrapy: AsyncMock,
+        mock_queue_scraping: AsyncMock,
         mock_get_property_status: AsyncMock,
     ) -> None:
         """Test successful scraping process."""
         # Arrange
         reply_token = "test_reply_token"
         url = "https://suumo.jp/ms/mansion/tokyo/sc_shinjuku/"
-        line_user_id = "test_user_id"
+        line_user_id = "U1234567890abcdef1234567890abcdef"
 
         # We need to mock send_push_message
         with patch(
@@ -82,30 +85,31 @@ class TestHandleScrapingFunction:
             # No push message should be sent for success case
             mock_send_push.assert_not_called()
 
-            mock_start_scrapy.assert_called_once_with(
-                url=url, line_user_id=line_user_id
-            )
+            # Verify queue_scraping was called with correct parameters
+            mock_queue_scraping.assert_called_once()
+            scrape_request = mock_queue_scraping.call_args[0][0]
+            assert scrape_request.url == url
+            assert scrape_request.line_user_id == line_user_id
 
     @pytest.mark.asyncio
     async def test_handle_scraping_property_not_found(
         self,
         mock_send_reply: AsyncMock,
-        mock_start_scrapy: AsyncMock,
+        mock_queue_scraping: AsyncMock,
         mock_get_property_status: AsyncMock,
     ) -> None:
         """Test handling a property not found (404) response from the scrape endpoint."""
         # Arrange
         reply_token = "test_reply_token"
         url = "https://suumo.jp/ms/chuko/tokyo/sc_shinjuku/nc_98246732/"
-        line_user_id = "test_user_id"
+        line_user_id = "U1234567890abcdef1234567890abcdef"
 
-        # Mock the response from start_scrapy with a not_found status
-        mock_start_scrapy.return_value = {
-            "message": "Property not found",
-            "status": "not_found",
-            "url": url,
-            "error": "The property URL returned a 404 status code. The property may have been removed or the URL is incorrect.",
-        }
+        # Mock the response from queue_scraping with a not_found status
+        mock_queue_scraping.return_value = None
+        mock_queue_scraping.side_effect = HTTPException(
+            status_code=404,
+            detail="Property not found (404). The URL may be incorrect or the property listing may have been removed.",
+        )
 
         # We need to mock send_push_message
         with patch(
@@ -130,23 +134,25 @@ class TestHandleScrapingFunction:
                 "指定された物件は見つかりませんでした。URLが正しいか、または物件が削除されていないか確認してください。",
             )
 
-            mock_start_scrapy.assert_called_once_with(
-                url=url, line_user_id=line_user_id
-            )
+            # Verify queue_scraping was called with correct parameters
+            mock_queue_scraping.assert_called_once()
+            scrape_request = mock_queue_scraping.call_args[0][0]
+            assert scrape_request.url == url
+            assert scrape_request.line_user_id == line_user_id
 
     @pytest.mark.asyncio
     async def test_handle_scraping_http_exception(
         self,
         mock_send_reply: AsyncMock,
-        mock_start_scrapy: AsyncMock,
+        mock_queue_scraping: AsyncMock,
         mock_get_property_status: AsyncMock,
     ) -> None:
         """Test handling of HTTPException during scraping."""
         # Arrange
         reply_token = "test_reply_token"
         url = "https://suumo.jp/ms/mansion/tokyo/sc_shinjuku/"
-        line_user_id = "test_user_id"
-        mock_start_scrapy.side_effect = HTTPException(
+        line_user_id = "U1234567890abcdef1234567890abcdef"
+        mock_queue_scraping.side_effect = HTTPException(
             status_code=500, detail="Internal server error"
         )
 
@@ -170,21 +176,21 @@ class TestHandleScrapingFunction:
             # Error message sent as push message
             mock_send_push.assert_called_once_with(
                 line_user_id,
-                "申し訳ありません。リクエストの処理中にエラーが発生しました。",
+                "申し訳ありません。リクエストの処理中にエラーが発生しました。後でもう一度お試しください。",
             )
 
     @pytest.mark.asyncio
     async def test_handle_scraping_general_exception(
         self,
         mock_send_reply: AsyncMock,
-        mock_start_scrapy: AsyncMock,
+        mock_queue_scraping: AsyncMock,
         mock_get_property_status: AsyncMock,
     ) -> None:
         """Test handling of general exceptions during scraping."""
         # Arrange
         reply_token = "test_reply_token"
         url = "https://suumo.jp/ms/mansion/tokyo/sc_shinjuku/"
-        line_user_id = "test_user_id"
+        line_user_id = "U1234567890abcdef1234567890abcdef"
 
         # Configure the mock to raise an exception on the second call
         mock_send_reply.side_effect = [None, Exception("Test exception")]
@@ -195,8 +201,8 @@ class TestHandleScrapingFunction:
         ) as mock_send_push:
             mock_send_push.return_value = None
 
-            # Also mock the general exception in start_scrapy
-            mock_start_scrapy.side_effect = Exception("General error")
+            # Also mock the general exception in queue_scraping
+            mock_queue_scraping.side_effect = Exception("General error")
 
             # Act
             await handle_scraping(reply_token, url, line_user_id)
@@ -210,7 +216,7 @@ class TestHandleScrapingFunction:
             # Error message sent as push message
             mock_send_push.assert_called_once_with(
                 line_user_id,
-                "申し訳ありません。リクエストの処理中にエラーが発生しました。",
+                "申し訳ありません。リクエストの処理中にエラーが発生しました。後でもう一度お試しください。",
             )
 
 
@@ -231,17 +237,18 @@ class TestHandleScrapingError:
     ) -> None:
         """Test handling a connection error."""
         # Arrange
-        line_user_id = "test_user_id"
-        error_message = "ConnectionError: Failed to establish a connection"
+        line_user_id = "U1234567890abcdef1234567890abcdef"
+        error = HTTPException(
+            status_code=500, detail="ConnectionError: Failed to establish a connection"
+        )
 
         # Act
-        await handle_scraping_error(line_user_id, error_message)
+        await handle_http_exception(error, line_user_id)
 
         # Assert
-        mock_send_push_message.assert_called_once()
-        assert (
-            "スクレイピング中にエラーが発生しました"
-            in mock_send_push_message.call_args[0][1]
+        mock_send_push_message.assert_called_once_with(
+            line_user_id,
+            "申し訳ありません。リクエストの処理中にエラーが発生しました。後でもう一度お試しください。",
         )
 
     @pytest.mark.asyncio
@@ -250,15 +257,19 @@ class TestHandleScrapingError:
     ) -> None:
         """Test handling a DNS lookup error."""
         # Arrange
-        line_user_id = "test_user_id"
-        error_message = "DNSLookupError: DNS lookup failed"
+        line_user_id = "U1234567890abcdef1234567890abcdef"
+        error = HTTPException(
+            status_code=500, detail="DNSLookupError: DNS lookup failed"
+        )
 
         # Act
-        await handle_scraping_error(line_user_id, error_message)
+        await handle_http_exception(error, line_user_id)
 
         # Assert
-        mock_send_push_message.assert_called_once()
-        assert "申し訳ありません" in mock_send_push_message.call_args[0][1]
+        mock_send_push_message.assert_called_once_with(
+            line_user_id,
+            "申し訳ありません。リクエストの処理中にエラーが発生しました。後でもう一度お試しください。",
+        )
 
     @pytest.mark.asyncio
     async def test_handle_scraping_error_timeout_error(
@@ -266,15 +277,17 @@ class TestHandleScrapingError:
     ) -> None:
         """Test handling a timeout error."""
         # Arrange
-        line_user_id = "test_user_id"
-        error_message = "TimeoutError: Request timed out"
+        line_user_id = "U1234567890abcdef1234567890abcdef"
+        error = HTTPException(status_code=500, detail="TimeoutError: Request timed out")
 
         # Act
-        await handle_scraping_error(line_user_id, error_message)
+        await handle_http_exception(error, line_user_id)
 
         # Assert
-        mock_send_push_message.assert_called_once()
-        assert "申し訳ありません" in mock_send_push_message.call_args[0][1]
+        mock_send_push_message.assert_called_once_with(
+            line_user_id,
+            "申し訳ありません。リクエストの処理中にエラーが発生しました。後でもう一度お試しください。",
+        )
 
     @pytest.mark.asyncio
     async def test_handle_scraping_error_general_error(
@@ -282,17 +295,16 @@ class TestHandleScrapingError:
     ) -> None:
         """Test handling a general error."""
         # Arrange
-        line_user_id = "test_user_id"
-        error_message = "Some unexpected error occurred"
+        line_user_id = "U1234567890abcdef1234567890abcdef"
+        error = HTTPException(status_code=500, detail="Some unexpected error occurred")
 
         # Act
-        await handle_scraping_error(line_user_id, error_message)
+        await handle_http_exception(error, line_user_id)
 
         # Assert
-        mock_send_push_message.assert_called_once()
-        assert (
-            "スクレイピング中にエラーが発生しました"
-            in mock_send_push_message.call_args[0][1]
+        mock_send_push_message.assert_called_once_with(
+            line_user_id,
+            "申し訳ありません。リクエストの処理中にエラーが発生しました。後でもう一度お試しください。",
         )
 
     @pytest.mark.asyncio
@@ -301,15 +313,17 @@ class TestHandleScrapingError:
     ) -> None:
         """Test handling a 404 error."""
         # Arrange
-        line_user_id = "test_user_id"
-        error_message = "HTTP Status Code: 404 - Property not found"
+        line_user_id = "U1234567890abcdef1234567890abcdef"
+        error = HTTPException(status_code=404, detail="Property not found")
 
         # Act
-        await handle_scraping_error(line_user_id, error_message)
+        await handle_http_exception(error, line_user_id)
 
         # Assert
-        mock_send_push_message.assert_called_once()
-        assert "物件は見つかりませんでした" in mock_send_push_message.call_args[0][1]
+        mock_send_push_message.assert_called_once_with(
+            line_user_id,
+            "指定された物件は見つかりませんでした。URLが正しいか、または物件が削除されていないか確認してください。",
+        )
 
     @pytest.mark.asyncio
     async def test_handle_scraping_error_403(
@@ -317,15 +331,19 @@ class TestHandleScrapingError:
     ) -> None:
         """Test handling a 403 error."""
         # Arrange
-        line_user_id = "test_user_id"
-        error_message = "HTTP Status Code: 403 - Forbidden"
+        line_user_id = "U1234567890abcdef1234567890abcdef"
+        error = HTTPException(
+            status_code=403, detail="HTTP Status Code: 403 - Forbidden"
+        )
 
         # Act
-        await handle_scraping_error(line_user_id, error_message)
+        await handle_http_exception(error, line_user_id)
 
         # Assert
-        mock_send_push_message.assert_called_once()
-        assert "アクセスが拒否されました" in mock_send_push_message.call_args[0][1]
+        mock_send_push_message.assert_called_once_with(
+            line_user_id,
+            "申し訳ありません。リクエストの処理中にエラーが発生しました。後でもう一度お試しください。",
+        )
 
     @pytest.mark.asyncio
     async def test_handle_scraping_error_500(
@@ -333,17 +351,18 @@ class TestHandleScrapingError:
     ) -> None:
         """Test handling a 500 error."""
         # Arrange
-        line_user_id = "test_user_id"
-        error_message = "HTTP Status Code: 500 - Internal Server Error"
+        line_user_id = "U1234567890abcdef1234567890abcdef"
+        error = HTTPException(
+            status_code=500, detail="HTTP Status Code: 500 - Internal Server Error"
+        )
 
         # Act
-        await handle_scraping_error(line_user_id, error_message)
+        await handle_http_exception(error, line_user_id)
 
         # Assert
-        mock_send_push_message.assert_called_once()
-        assert (
-            "物件サイトでエラーが発生しています"
-            in mock_send_push_message.call_args[0][1]
+        mock_send_push_message.assert_called_once_with(
+            line_user_id,
+            "申し訳ありません。リクエストの処理中にエラーが発生しました。後でもう一度お試しください。",
         )
 
     @pytest.mark.asyncio
@@ -352,15 +371,20 @@ class TestHandleScrapingError:
     ) -> None:
         """Test handling an HTTP error."""
         # Arrange
-        line_user_id = "test_user_id"
-        error_message = "HttpError on https://suumo.jp/ms/mansion/tokyo/sc_shinjuku/"
+        line_user_id = "U1234567890abcdef1234567890abcdef"
+        error = HTTPException(
+            status_code=500,
+            detail="HttpError on https://suumo.jp/ms/mansion/tokyo/sc_shinjuku/",
+        )
 
         # Act
-        await handle_scraping_error(line_user_id, error_message)
+        await handle_http_exception(error, line_user_id)
 
         # Assert
-        mock_send_push_message.assert_called_once()
-        assert "URLにアクセスできませんでした" in mock_send_push_message.call_args[0][1]
+        mock_send_push_message.assert_called_once_with(
+            line_user_id,
+            "申し訳ありません。リクエストの処理中にエラーが発生しました。後でもう一度お試しください。",
+        )
 
     @pytest.mark.asyncio
     async def test_handle_scraping_error_property_name_not_found(
@@ -368,17 +392,18 @@ class TestHandleScrapingError:
     ) -> None:
         """Test handling a property name not found error."""
         # Arrange
-        line_user_id = "test_user_id"
-        error_message = "Property name not found in the scraped data"
+        line_user_id = "U1234567890abcdef1234567890abcdef"
+        error = HTTPException(
+            status_code=404, detail="Property name not found in the scraped data"
+        )
 
         # Act
-        await handle_scraping_error(line_user_id, error_message)
+        await handle_http_exception(error, line_user_id)
 
         # Assert
-        mock_send_push_message.assert_called_once()
-        assert (
-            "スクレイピング中にエラーが発生しました"
-            in mock_send_push_message.call_args[0][1]
+        mock_send_push_message.assert_called_once_with(
+            line_user_id,
+            "指定された物件は見つかりませんでした。URLが正しいか、または物件が削除されていないか確認してください。",
         )
 
     @pytest.mark.asyncio
@@ -387,17 +412,18 @@ class TestHandleScrapingError:
     ) -> None:
         """Test handling a validation error."""
         # Arrange
-        line_user_id = "test_user_id"
-        error_message = "ValidationError: Invalid data format"
+        line_user_id = "U1234567890abcdef1234567890abcdef"
+        error = HTTPException(
+            status_code=422, detail="ValidationError: Invalid data format"
+        )
 
         # Act
-        await handle_scraping_error(line_user_id, error_message)
+        await handle_http_exception(error, line_user_id)
 
         # Assert
-        mock_send_push_message.assert_called_once()
-        assert (
-            "スクレイピング中にエラーが発生しました"
-            in mock_send_push_message.call_args[0][1]
+        mock_send_push_message.assert_called_once_with(
+            line_user_id,
+            "申し訳ありません。リクエストの処理中にエラーが発生しました。後でもう一度お試しください。",
         )
 
 

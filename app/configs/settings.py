@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     GCP_BUCKET_NAME: str
     GCP_FOLDER_NAME: str
     GCS_IMAGE_QUALITY: int
-    PUBSUB_TOPIC: str = "mansion-watch-scraper"
+    PUBSUB_TOPIC: str = "mansion-watch-scraper-topic"
     PUBSUB_SUBSCRIPTION: str = "mansion-watch-scraper-sub-push"
     PUBSUB_MAX_MESSAGES: int = 100
     PUBSUB_MAX_BYTES: int = 10485760  # 10MB

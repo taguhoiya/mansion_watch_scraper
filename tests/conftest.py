@@ -93,18 +93,31 @@ def mock_db() -> Generator[MagicMock, None, None]:
     This fixture creates a mock database instance that returns mock collections
     when accessed with the dictionary syntax (db[collection_name]).
 
-    Yields:
+    Returns:
         MagicMock: A mock of the AsyncIOMotorDatabase
     """
     mock_db_instance = MagicMock(spec=AsyncIOMotorDatabase)
 
-    # Create a function to return mock collections
-    def get_collection(collection_name: str) -> AsyncMock:
-        """Return a mock collection for the given name."""
-        return AsyncMock(spec=AsyncIOMotorCollection)
+    # Create mock collections
+    mock_properties = AsyncMock()
+    mock_user_properties = AsyncMock()
+    mock_users = AsyncMock(count_documents=AsyncMock(return_value=0))
+    mock_properties_collection = AsyncMock(count_documents=AsyncMock(return_value=0))
+    mock_user_properties_collection = AsyncMock(
+        count_documents=AsyncMock(return_value=0)
+    )
 
-    # Set up the __getitem__ method to return a mock collection
-    mock_db_instance.__getitem__.side_effect = get_collection
+    # Set up collection mapping
+    collections = {
+        "properties": mock_properties,
+        "user_properties": mock_user_properties,
+        settings.COLLECTION_USERS: mock_users,
+        settings.COLLECTION_PROPERTIES: mock_properties_collection,
+        settings.COLLECTION_USER_PROPERTIES: mock_user_properties_collection,
+    }
+
+    # Set up the __getitem__ method to return appropriate mock collections
+    mock_db_instance.__getitem__.side_effect = lambda x: collections.get(x, AsyncMock())
 
     with patch("app.db.session.get_db", return_value=mock_db_instance):
         yield mock_db_instance
@@ -139,3 +152,52 @@ def mock_env_vars() -> Generator[None, None, None]:
     # Restore original environment variables
     os.environ.clear()
     os.environ.update(original_env)
+
+
+@pytest.fixture(autouse=True)
+def mock_google_auth():
+    """Mock Google Cloud authentication for all tests."""
+    with patch("google.auth.default") as mock:
+        mock.return_value = (MagicMock(), "mock-project")
+        yield mock
+
+
+@pytest.fixture(autouse=True)
+def mock_google_cloud_storage():
+    """Mock Google Cloud Storage for all tests."""
+    with patch("google.cloud.storage.Client") as mock:
+        mock_client = MagicMock()
+        mock.return_value = mock_client
+        yield mock_client
+
+
+@pytest.fixture(autouse=True)
+def mock_gcp_credentials():
+    """Mock Google Cloud credentials for all tests."""
+    with patch.dict(
+        os.environ,
+        {
+            "GOOGLE_APPLICATION_CREDENTIALS": "dummy-credentials.json",
+            "GCP_PROJECT_ID": "dummy-project",
+            "PUBSUB_TOPIC": "dummy-topic",
+        },
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def mock_pubsub_client():
+    """Mock Google Cloud Pub/Sub client for all tests."""
+    with patch("google.cloud.pubsub_v1.PublisherClient") as mock_publisher:
+        # Create a mock future for publish calls
+        mock_future = MagicMock()
+        mock_future.result.return_value = "test_message_id"
+        mock_publisher.return_value.publish.return_value = mock_future
+        mock_publisher.return_value.topic_path.return_value = "test_topic_path"
+
+        # Create a mock subscriber
+        with patch("google.cloud.pubsub_v1.SubscriberClient") as mock_subscriber:
+            mock_subscriber.return_value.subscription_path.return_value = (
+                "test_subscription_path"
+            )
+            yield mock_publisher, mock_subscriber
