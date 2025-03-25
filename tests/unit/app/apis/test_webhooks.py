@@ -3,6 +3,7 @@ from typing import Generator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from bson import ObjectId
 from fastapi import HTTPException, Request, status
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import FollowEvent, MessageEvent, Source, TextMessageContent
@@ -653,8 +654,12 @@ class TestGetPropertyStatus:
     ) -> None:
         """Test when property exists and user has access."""
         properties_collection, user_properties_collection, _ = mock_collections
-        properties_collection.find_one.return_value = {"_id": "123", "url": "test_url"}
-        user_properties_collection.find_one.return_value = {"property_id": "123"}
+        test_id = ObjectId("123456789012345678901234")
+        properties_collection.find_one.return_value = {
+            "_id": test_id,
+            "url": "test_url",
+        }
+        user_properties_collection.find_one.return_value = {"property_id": test_id}
 
         with patch(
             "app.apis.webhooks.get_database_collections", return_value=mock_collections
@@ -665,7 +670,7 @@ class TestGetPropertyStatus:
 
             assert status.exists is True
             assert status.user_has_access is True
-            assert status.property_id == "123"
+            assert status.property_id == str(test_id)
 
     @pytest.mark.asyncio
     async def test_property_exists_user_no_access(
@@ -674,7 +679,11 @@ class TestGetPropertyStatus:
     ) -> None:
         """Test when property exists but user doesn't have access."""
         properties_collection, user_properties_collection, _ = mock_collections
-        properties_collection.find_one.return_value = {"_id": "123", "url": "test_url"}
+        test_id = ObjectId("123456789012345678901234")
+        properties_collection.find_one.return_value = {
+            "_id": test_id,
+            "url": "test_url",
+        }
         user_properties_collection.find_one.return_value = None
 
         with patch(
@@ -686,7 +695,7 @@ class TestGetPropertyStatus:
 
             assert status.exists is True
             assert status.user_has_access is False
-            assert status.property_id == "123"
+            assert status.property_id == str(test_id)
 
 
 @pytest.mark.webhook

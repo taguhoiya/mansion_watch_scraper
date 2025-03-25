@@ -5,6 +5,7 @@ import re
 from typing import List, NamedTuple, Optional, Protocol
 from urllib.parse import urlparse
 
+from bson import ObjectId
 from fastapi import APIRouter, HTTPException, Request, status
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
@@ -108,7 +109,7 @@ async def add_user_property(
 
     await user_properties_collection.insert_one(
         {
-            "property_id": property_id,
+            "property_id": ObjectId(property_id),
             "line_user_id": line_user_id,
             "created_at": current_time,
             "updated_at": current_time,
@@ -395,7 +396,7 @@ def is_valid_property_url(url: str) -> bool:
 async def send_reply(reply_token: str, message: str) -> None:
     """Send a reply message to the user."""
     try:
-        async with ApiClient(line_config) as api_client:
+        with ApiClient(line_config) as api_client:
             line_bot_api = MessagingApi(api_client)
             await line_bot_api.reply_message_with_http_info(
                 ReplyMessageRequest(
@@ -410,7 +411,7 @@ async def send_reply(reply_token: str, message: str) -> None:
 async def send_push_message(user_id: str, message: str) -> None:
     """Send a push message to the user."""
     try:
-        async with ApiClient(line_config) as api_client:
+        with ApiClient(line_config) as api_client:
             line_bot_api = MessagingApi(api_client)
             await line_bot_api.push_message_with_http_info(
                 PushMessageRequest(
