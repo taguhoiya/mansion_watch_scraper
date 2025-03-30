@@ -14,13 +14,17 @@ class UserProperty(BaseModel):
         alias="_id",
         description="User property ID",
     )
-    line_user_id: str = Field(..., description="User ID from LINE platform")
-    property_id: PyObjectId = Field(..., description="ID of the property being tracked")
-    last_aggregated_at: datetime = Field(
-        ..., description="Start time of the last aggregation period"
+    line_user_id: Optional[str] = Field(
+        default=None, description="User ID from LINE platform"
     )
-    next_aggregated_at: datetime = Field(
-        ...,
+    property_id: Optional[PyObjectId] = Field(
+        default=None, description="ID of the property being tracked"
+    )
+    last_aggregated_at: Optional[datetime] = Field(
+        default=None, description="Start time of the last aggregation period"
+    )
+    next_aggregated_at: Optional[datetime] = Field(
+        default=None,
         description="Scheduled time for the next aggregation (typically 3 days after last_aggregated_at)",
     )
     first_succeeded_at: Optional[datetime] = Field(
