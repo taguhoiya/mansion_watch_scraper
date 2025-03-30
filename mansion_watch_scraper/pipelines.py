@@ -198,17 +198,23 @@ def process_user_property(
         return None
 
     user_property_dict = convert_to_dict(item[USER_PROPERTIES], "user_properties")
-    user_property_dict["property_id"] = property_id
+
+    # Ensure property_id is ObjectId before creating UserProperty object
+    user_property_dict["property_id"] = ensure_object_id(property_id)
+
+    # Get line_user_id from main item or from user_properties
+    if "line_user_id" in item:
+        user_property_dict["line_user_id"] = item["line_user_id"]
+    elif isinstance(item[USER_PROPERTIES], UserProperty):
+        user_property_dict["line_user_id"] = item[USER_PROPERTIES].line_user_id
+    else:
+        raise ValueError("line_user_id not found in item or user_properties")
+
     user_property_obj = UserProperty(**user_property_dict)
     user_property_dict = convert_to_dict(user_property_obj, "user_properties")
 
     if "_id" in user_property_dict and user_property_dict["_id"] is None:
         user_property_dict.pop("_id")
-
-    if "property_id" in user_property_dict:
-        user_property_dict["property_id"] = ensure_object_id(
-            user_property_dict["property_id"]
-        )
 
     query = {
         "line_user_id": user_property_dict["line_user_id"],

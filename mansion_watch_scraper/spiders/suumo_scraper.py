@@ -122,6 +122,47 @@ class MansionWatchSpider(scrapy.Spider):
                 self._handle_check_only(response)
                 return
 
+            # Check if this is a library page (sold-out property)
+            original_url = response.meta.get("original_url", "")
+            is_redirected_to_library = self._is_redirected_to_library(
+                response, original_url
+            )
+
+            # If redirected to library, update is_active and timestamps
+            if is_redirected_to_library:
+                current_time = datetime.now()
+                # Set next_aggregated_at to year '9999-12-31 23:59:59' to indicate it's sold out
+                sold_out_date = datetime(9999, 12, 31, 23, 59, 59)
+
+                # First get the property ID from the database
+                property_item = self._extract_property_info(response)
+                if not property_item:
+                    self.logger.error(
+                        f"Failed to extract property information: {response.url}"
+                    )
+                    return
+
+                yield {
+                    "properties": {
+                        "url": original_url,
+                        "is_active": False,
+                        "updated_at": current_time,
+                    },
+                    "property_overviews": {
+                        "updated_at": current_time,
+                    },
+                    "common_overviews": {
+                        "updated_at": current_time,
+                    },
+                    "user_properties": {
+                        "line_user_id": self.line_user_id,
+                        "last_aggregated_at": current_time,
+                        "next_aggregated_at": sold_out_date,  # Far future date to indicate sold out
+                        "last_succeeded_at": current_time,  # Update last success time
+                    },
+                }
+                return
+
             property_item = self._extract_property_info(response)
             if not property_item:
                 self.logger.error(
@@ -536,6 +577,23 @@ class MansionWatchSpider(scrapy.Spider):
 
         return processed_urls
 
+    def _process_area_text(self, raw_text: str) -> List[str]:
+        """Process area text and return list of area values.
+
+        Args:
+            raw_text: Raw text containing area values
+        Returns:
+            List of processed area values
+        """
+        # Clean up the text
+        text = raw_text.replace("m2", "㎡").replace(" 2 ", " ").replace(" 2（", "（")
+        # Split into parts
+        parts = text.split()
+        # Handle standalone 'm' in each part
+        parts = [part.replace("m", "㎡") if "m" in part else part for part in parts]
+        # Ensure at least 2 elements (pad with 情報なし if needed)
+        return parts + ["情報なし"] * (2 - len(parts))
+
     def _extract_property_overview(
         self,
         response: Response,
@@ -553,11 +611,7 @@ class MansionWatchSpider(scrapy.Spider):
         Returns:
             PropertyOverview object containing property overview details
         """
-        # Refactored XPath to handle different layout types in a single query
         property_title = property_name + ElementKeys.APERTMENT_SUFFIX.value
-
-        # First pattern: secTitleOuter/secTitleInner pattern
-        # Second pattern: alternative pattern with mainContents
         xpath = f"""(
             //div[contains(@class, "secTitleOuter")]/h3[contains(@class, "secTitleInner") and contains(text(), "{property_title}")]/ancestor::div/following-sibling::table/tbody/tr
             |
@@ -565,14 +619,57 @@ class MansionWatchSpider(scrapy.Spider):
         )"""
 
         items = response.xpath(xpath)
-
         overview_dict = {}
+
         for item in items:
             keys = [
                 k.strip() for k in item.xpath("th/div/text()").getall() if k.strip()
             ]
-            values = [v.strip() for v in item.xpath("td/text()").getall() if v.strip()]
-            overview_dict.update(dict(zip(keys, values)))
+
+            if any(key in ["専有面積", "その他面積"] for key in keys):
+                raw_text = "".join(item.xpath("td//text()").getall()).strip()
+                area_values = self._process_area_text(raw_text)
+
+                if "専有面積" in keys:
+                    overview_dict["専有面積"] = area_values[0]
+                if "その他面積" in keys:
+                    overview_dict["その他面積"] = area_values[1]
+            else:
+                values = [
+                    v.strip() for v in item.xpath("td/text()").getall() if v.strip()
+                ]
+                overview_dict.update(dict(zip(keys, values)))
+
+        # Ensure required fields have default values
+        default_values = {
+            "専有面積": "情報なし",
+            "その他面積": "情報なし",
+            "販売スケジュール": "情報なし",
+            "イベント情報": "情報なし",
+            "販売戸数": "情報なし",
+            "最多価格帯": "情報なし",
+            "価格": "情報なし",
+            "管理費": "情報なし",
+            "修繕積立金": "情報なし",
+            "修繕積立基金": "情報なし",
+            "諸費用": "情報なし",
+            "間取り": "情報なし",
+            "引渡可能時期": "情報なし",
+            "完成時期(築年月)": "情報なし",
+            "所在階": "情報なし",
+            "向き": "情報なし",
+            "エネルギー消費性能": "情報なし",
+            "断熱性能": "情報なし",
+            "目安光熱費": "情報なし",
+            "リフォーム": "情報なし",
+            "その他制限事項": "情報なし",
+            "その他概要・特記事項": "情報なし",
+        }
+
+        # Update overview_dict with default values for missing fields
+        for key, default_value in default_values.items():
+            if key not in overview_dict:
+                overview_dict[key] = default_value
 
         overview_dict = translate_keys(overview_dict, PROPERTY_OVERVIEW_TRANSLATION_MAP)
         overview_dict.update(
@@ -802,12 +899,15 @@ class MansionWatchSpider(scrapy.Spider):
 
             # Handle library page (sold-out property)
             if is_redirected_to_library:
+                self.logger.info(
+                    f"Creating sold-out property object for: {response.url}"
+                )
                 return Property(
                     name=f"{property_name or '物件名不明'} (売却済み)",
                     url=response.url,
                     large_property_description="この物件は現在販売されていません。",
                     small_property_description="この物件は売却済みです。最新の情報はSUUMOのライブラリページでご確認ください。",
-                    is_active=False,
+                    is_active=False,  # Ensure this is False for library pages
                     created_at=datetime.now(),
                     updated_at=datetime.now(),
                     image_urls=[],
@@ -846,19 +946,6 @@ class MansionWatchSpider(scrapy.Spider):
                 )
                 return None
 
-            # Extract property size
-            size_text = response.xpath(
-                "//td[preceding-sibling::th/div[contains(text(), '専有面積')]]/text()"
-            ).get()
-            if not size_text:
-                self.logger.error(
-                    f"Failed to extract property size. url: {response.url}"
-                )
-                return None
-
-            # Convert size text to float (in square meters)
-            size = float("".join(c for c in size_text if c.isdigit() or c == "."))
-
             # Extract descriptions
             large_desc = self._extract_large_prop_desc(response)
             small_desc = self._extract_small_prop_desc(response)
@@ -872,10 +959,9 @@ class MansionWatchSpider(scrapy.Spider):
                 url=response.url,
                 price=price,
                 address=address.strip(),
-                size=size,
                 large_property_description=large_desc,
                 small_property_description=small_desc,
-                is_active=True,
+                is_active=not is_redirected_to_library,  # Set based on redirect status
                 created_at=datetime.now(),
                 updated_at=datetime.now(),
                 image_urls=image_urls,
