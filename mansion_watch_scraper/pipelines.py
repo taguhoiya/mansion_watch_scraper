@@ -217,7 +217,6 @@ def process_user_property(
 
     existing = db[USER_PROPERTIES].find_one(query)
     current_time = get_current_time()
-    existing = db[USER_PROPERTIES].find_one(query)
 
     if existing:
         # For existing records, only update specific fields

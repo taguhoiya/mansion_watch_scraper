@@ -142,8 +142,12 @@ class MansionWatchSpider(scrapy.Spider):
                     )
                     return
 
+                name_xpath = '//*[@id="contents"]/div[1]/h1/text()'
+                name = name_xpath.get()
+
                 yield {
                     "properties": {
+                        "name": name,
                         "url": original_url,
                         "is_active": False,
                         "updated_at": current_time,
@@ -156,9 +160,8 @@ class MansionWatchSpider(scrapy.Spider):
                     },
                     "user_properties": {
                         "line_user_id": self.line_user_id,
-                        "last_aggregated_at": current_time,
+                        "last_aggregated_at": current_time,  # Update last aggregation time
                         "next_aggregated_at": sold_out_date,  # Far future date to indicate sold out
-                        "last_succeeded_at": current_time,  # Update last success time
                     },
                 }
                 return
@@ -640,37 +643,6 @@ class MansionWatchSpider(scrapy.Spider):
                 ]
                 overview_dict.update(dict(zip(keys, values)))
 
-        # Ensure required fields have default values
-        default_values = {
-            "専有面積": "情報なし",
-            "その他面積": "情報なし",
-            "販売スケジュール": "情報なし",
-            "イベント情報": "情報なし",
-            "販売戸数": "情報なし",
-            "最多価格帯": "情報なし",
-            "価格": "情報なし",
-            "管理費": "情報なし",
-            "修繕積立金": "情報なし",
-            "修繕積立基金": "情報なし",
-            "諸費用": "情報なし",
-            "間取り": "情報なし",
-            "引渡可能時期": "情報なし",
-            "完成時期(築年月)": "情報なし",
-            "所在階": "情報なし",
-            "向き": "情報なし",
-            "エネルギー消費性能": "情報なし",
-            "断熱性能": "情報なし",
-            "目安光熱費": "情報なし",
-            "リフォーム": "情報なし",
-            "その他制限事項": "情報なし",
-            "その他概要・特記事項": "情報なし",
-        }
-
-        # Update overview_dict with default values for missing fields
-        for key, default_value in default_values.items():
-            if key not in overview_dict:
-                overview_dict[key] = default_value
-
         overview_dict = translate_keys(overview_dict, PROPERTY_OVERVIEW_TRANSLATION_MAP)
         overview_dict.update(
             {
@@ -734,15 +706,16 @@ class MansionWatchSpider(scrapy.Spider):
         translated_dict = translate_keys(raw_data, COMMON_OVERVIEW_TRANSLATION_MAP)
 
         # Initialize with default values for all required fields
+        none_value = "情報なし"
         overview_dict = {
-            "location": "情報なし",
-            "transportation": ["情報なし"],
-            "total_units": "情報なし",
-            "structure_floors": "情報なし",
-            "site_area": "情報なし",
-            "site_ownership_type": "情報なし",
-            "usage_area": "情報なし",
-            "parking_lot": "情報なし",
+            "location": none_value,
+            "transportation": [none_value],
+            "total_units": none_value,
+            "structure_floors": none_value,
+            "site_area": none_value,
+            "site_ownership_type": none_value,
+            "usage_area": none_value,
+            "parking_lot": none_value,
         }
 
         # Update the default values with the translated data
@@ -795,80 +768,6 @@ class MansionWatchSpider(scrapy.Spider):
             )
             return True
         return False
-
-    def _create_default_property_overview(
-        self, current_time, property_id: Optional[ObjectId]
-    ) -> PropertyOverview:
-        """Create a default PropertyOverview object for library pages (sold-out properties).
-
-        Args:
-            current_time: Current timestamp
-            property_id: ID of the property or None
-
-        Returns:
-            Default PropertyOverview object
-        """
-        # Create a dictionary with default values for all required fields
-        none_value = "情報なし (売却済み)"
-
-        overview_dict = {
-            "sales_schedule": none_value,
-            "event_information": none_value,
-            "number_of_units_for_sale": none_value,
-            "highest_price_range": none_value,
-            "price": none_value,
-            "maintenance_fee": none_value,
-            "repair_reserve_fund": none_value,
-            "first_repair_reserve_fund": none_value,
-            "other_expenses": none_value,
-            "floor_plan": none_value,
-            "area": none_value,
-            "other_area": none_value,
-            "delivery_time": none_value,
-            "completion_time": none_value,
-            "floor": none_value,
-            "direction": none_value,
-            "energy_consumption_performance": none_value,
-            "insulation_performance": none_value,
-            "estimated_utility_cost": none_value,
-            "renovation": none_value,
-            "other_restrictions": none_value,
-            "other_overview_and_special_notes": none_value,
-            "created_at": current_time,
-            "updated_at": current_time,
-            "property_id": property_id,
-        }
-
-        return PropertyOverview(**overview_dict)
-
-    def _create_default_common_overview(
-        self, current_time, property_id: Optional[ObjectId]
-    ) -> CommonOverview:
-        """Create a default CommonOverview object for library pages (sold-out properties).
-
-        Args:
-            current_time: Current timestamp
-            property_id: ID of the property or None
-
-        Returns:
-            Default CommonOverview object
-        """
-        # Create a dictionary with default values for all required fields
-        overview_dict = {
-            "location": "情報なし (売却済み)",
-            "transportation": ["情報なし (売却済み)"],
-            "total_units": "情報なし (売却済み)",
-            "structure_floors": "情報なし (売却済み)",
-            "site_area": "情報なし (売却済み)",
-            "site_ownership_type": "情報なし (売却済み)",
-            "usage_area": "情報なし (売却済み)",
-            "parking_lot": "情報なし (売却済み)",
-            "created_at": current_time,
-            "updated_at": current_time,
-            "property_id": property_id,
-        }
-
-        return CommonOverview(**overview_dict)
 
     def _extract_property_info(self, response: Response) -> Optional[Property]:
         """Extract property information and create Property object.
