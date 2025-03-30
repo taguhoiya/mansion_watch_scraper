@@ -1,6 +1,7 @@
 ---
-description: For doing code review
-globs: *.tsx, *.ts, .*scss
+description: 
+globs: 
+alwaysApply: true
 ---
 # IDENTITY and PURPOSE
 
