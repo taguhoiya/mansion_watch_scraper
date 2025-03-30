@@ -74,7 +74,7 @@ gcloud run deploy mansion-watch-scraper \
    ```bash
    # Create secret
    gcloud secrets create MY_SECRET --data-file=./secret.txt
-   
+
    # Grant access to Cloud Run
    gcloud secrets add-iam-policy-binding MY_SECRET \
      --member=serviceAccount:service-account@project.iam.gserviceaccount.com \

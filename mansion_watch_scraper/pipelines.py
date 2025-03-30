@@ -198,17 +198,17 @@ def process_user_property(
         return None
 
     user_property_dict = convert_to_dict(item[USER_PROPERTIES], "user_properties")
-    user_property_dict["property_id"] = property_id
-    user_property_obj = UserProperty(**user_property_dict)
-    user_property_dict = convert_to_dict(user_property_obj, "user_properties")
 
+    # Ensure property_id is ObjectId
+    user_property_dict["property_id"] = ensure_object_id(property_id)
+
+    # Get line_user_id from user_properties
+    if "line_user_id" not in user_property_dict:
+        raise ValueError("line_user_id not found in user_properties")
+
+    # Remove _id if it exists and is None
     if "_id" in user_property_dict and user_property_dict["_id"] is None:
         user_property_dict.pop("_id")
-
-    if "property_id" in user_property_dict:
-        user_property_dict["property_id"] = ensure_object_id(
-            user_property_dict["property_id"]
-        )
 
     query = {
         "line_user_id": user_property_dict["line_user_id"],
@@ -219,24 +219,27 @@ def process_user_property(
     current_time = get_current_time()
 
     if existing:
-        update_data = {
-            **user_property_dict,
-            "last_succeeded_at": current_time,
-        }
-        for field in ["_id", "first_succeeded_at", "created_at"]:
+        # For existing records, only update specific fields
+        update_data = {**user_property_dict}
+        # Don't update these fields for existing records
+        for field in ["_id", "first_succeeded_at", "property_id", "line_user_id"]:
             update_data.pop(field, None)
+
+        # Add last_succeeded_at timestamp
+        update_data["last_succeeded_at"] = current_time
 
         db[USER_PROPERTIES].update_one(query, {"$set": update_data})
         return existing["_id"]
-
-    user_property_dict.update(
-        {
-            "last_succeeded_at": current_time,
-            "first_succeeded_at": current_time,
-        }
-    )
-    result = db[USER_PROPERTIES].insert_one(user_property_dict)
-    return result.inserted_id
+    else:
+        # For new records, include first_succeeded_at and created_at
+        user_property_dict.update(
+            {
+                "first_succeeded_at": current_time,
+                "last_succeeded_at": current_time,
+            }
+        )
+        result = db[USER_PROPERTIES].insert_one(user_property_dict)
+        return result.inserted_id
 
 
 def process_property_overview(
@@ -246,14 +249,21 @@ def process_property_overview(
     if PROPERTY_OVERVIEWS not in item:
         return None
 
-    item[PROPERTY_OVERVIEWS].property_id = property_id
-    overview_dict = convert_to_dict(item[PROPERTY_OVERVIEWS], "property_overviews")
+    # Handle both model objects and dictionaries
+    property_overview = item[PROPERTY_OVERVIEWS]
+    if hasattr(property_overview, "property_id"):
+        property_overview.property_id = property_id
+        overview_dict = convert_to_dict(property_overview, "property_overviews")
+    else:
+        # If it's a dictionary, set property_id directly in the dict
+        overview_dict = convert_to_dict(property_overview, "property_overviews")
+        overview_dict["property_id"] = property_id
+
+    # Ensure property_id is ObjectId
+    overview_dict["property_id"] = ensure_object_id(property_id)
 
     if "_id" in overview_dict and overview_dict["_id"] is None:
         overview_dict.pop("_id")
-
-    if "property_id" in overview_dict:
-        overview_dict["property_id"] = ensure_object_id(overview_dict["property_id"])
 
     query = {"property_id": property_id}
     existing = db[PROPERTY_OVERVIEWS].find_one(query)
@@ -275,14 +285,11 @@ def process_common_overview(
     if COMMON_OVERVIEWS not in item:
         return None
 
-    item[COMMON_OVERVIEWS].property_id = property_id
     overview_dict = convert_to_dict(item[COMMON_OVERVIEWS], "common_overviews")
+    overview_dict["property_id"] = ensure_object_id(property_id)
 
     if "_id" in overview_dict and overview_dict["_id"] is None:
         overview_dict.pop("_id")
-
-    if "property_id" in overview_dict:
-        overview_dict["property_id"] = ensure_object_id(overview_dict["property_id"])
 
     query = {"property_id": property_id}
     existing = db[COMMON_OVERVIEWS].find_one(query)

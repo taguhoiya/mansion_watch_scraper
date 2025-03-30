@@ -1,6 +1,7 @@
 """Tests for the scraping functionality."""
 
 import asyncio
+from datetime import datetime
 from typing import Generator
 from unittest.mock import MagicMock, patch
 
@@ -16,6 +17,7 @@ def test_scrape_request_validation():
     request = ScrapeRequest(
         url="https://suumo.jp/ms/chintai/tokyo/sc_shinjuku/",
         line_user_id="U1234567890abcdef1234567890abcdef",
+        timestamp=datetime.now(),
     )
     assert request.url == "https://suumo.jp/ms/chintai/tokyo/sc_shinjuku/"
     assert request.line_user_id == "U1234567890abcdef1234567890abcdef"
@@ -24,13 +26,17 @@ def test_scrape_request_validation():
     # Test invalid URL
     with pytest.raises(ValueError, match="url must start with https://suumo.jp/ms"):
         ScrapeRequest(
-            url="https://invalid.com", line_user_id="U1234567890abcdef1234567890abcdef"
+            url="https://invalid.com",
+            line_user_id="U1234567890abcdef1234567890abcdef",
+            timestamp=datetime.now(),
         )
 
     # Test invalid line_user_id
     with pytest.raises(ValueError, match="line_user_id must start with U"):
         ScrapeRequest(
-            url="https://suumo.jp/ms/chintai/tokyo/sc_shinjuku/", line_user_id="invalid"
+            url="https://suumo.jp/ms/chintai/tokyo/sc_shinjuku/",
+            line_user_id="invalid",
+            timestamp=datetime.now(),
         )
 
 
@@ -50,7 +56,9 @@ class TestQueueScraping:
         # Arrange
         url = "https://suumo.jp/ms/chintai/tokyo/sc_shinjuku/"
         line_user_id = "U1234567890abcdef1234567890abcdef"
-        request = ScrapeRequest(url=url, line_user_id=line_user_id)
+        request = ScrapeRequest(
+            url=url, line_user_id=line_user_id, timestamp=datetime.now()
+        )
 
         # Configure the mock
         mock_future = MagicMock()
@@ -74,7 +82,12 @@ class TestQueueScraping:
         # Arrange
         url = "https://suumo.jp/ms/chintai/tokyo/sc_shinjuku/"
         line_user_id = "U1234567890abcdef1234567890abcdef"
-        request = ScrapeRequest(url=url, line_user_id=line_user_id, check_only=True)
+        request = ScrapeRequest(
+            url=url,
+            line_user_id=line_user_id,
+            check_only=True,
+            timestamp=datetime.now(),
+        )
 
         # Configure the mock
         mock_future = MagicMock()
@@ -96,7 +109,9 @@ class TestQueueScraping:
         # Arrange
         url = "https://suumo.jp/ms/chintai/tokyo/sc_shinjuku/"
         line_user_id = "U1234567890abcdef1234567890abcdef"
-        request = ScrapeRequest(url=url, line_user_id=line_user_id)
+        request = ScrapeRequest(
+            url=url, line_user_id=line_user_id, timestamp=datetime.now()
+        )
 
         # Configure the mock to raise TimeoutError
         mock_future = MagicMock()
@@ -116,7 +131,9 @@ class TestQueueScraping:
         # Arrange
         url = "https://suumo.jp/ms/chintai/tokyo/sc_shinjuku/"
         line_user_id = "U1234567890abcdef1234567890abcdef"
-        request = ScrapeRequest(url=url, line_user_id=line_user_id)
+        request = ScrapeRequest(
+            url=url, line_user_id=line_user_id, timestamp=datetime.now()
+        )
 
         # Configure the mock to raise an error
         mock_publisher.publish.side_effect = Exception("Test error")

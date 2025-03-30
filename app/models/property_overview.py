@@ -95,7 +95,7 @@ class PropertyOverview(BaseModel):
                 "first_repair_reserve_fund": "-",
                 "other_expenses": "-",
                 "floor_plan": "2LDK",
-                "area": "92.36m",
+                "area": "92.36㎡",
                 "other_area": "（27.93坪）（壁芯）",
                 "delivery_time": "相談",
                 "completion_time": "2009年12月",
