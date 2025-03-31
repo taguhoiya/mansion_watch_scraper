@@ -1,6 +1,7 @@
 import logging
 import os
 from concurrent import futures
+from datetime import datetime
 from typing import Dict
 
 from fastapi import APIRouter, HTTPException, status
@@ -35,6 +36,7 @@ def get_topic_path():
 
 
 class ScrapeRequest(BaseModel):
+    timestamp: datetime
     url: str
     line_user_id: str
     check_only: bool = False  # If True, only check if property exists
