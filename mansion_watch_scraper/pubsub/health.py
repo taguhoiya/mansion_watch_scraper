@@ -123,11 +123,16 @@ def publish_property_messages(
             )
 
     # log successful urls
-    logger.info(f"Published messages for urls: {[prop['url'] for prop in properties]}")
+    logger.info(
+        f"Published messages for {len(properties)} urls: {[prop['url'] for prop in properties]}"
+    )
 
 
-def get_properties_for_batch() -> List[Dict[str, Any]]:
+def get_properties_for_batch(line_user_id: str = None) -> List[Dict[str, Any]]:
     """Get all properties that need to be processed in batch.
+
+    Args:
+        line_user_id: Optional LINE user ID to filter properties for a specific user
 
     Returns:
         List of ScrapeRequest-compatible dictionaries containing:
@@ -140,10 +145,17 @@ def get_properties_for_batch() -> List[Dict[str, Any]]:
     user_properties_collection = db[os.getenv("COLLECTION_USER_PROPERTIES")]
     current_time = get_current_time()
 
+    # Base match stage for aggregation pipeline
+    match_stage = {"next_aggregated_at": {"$lte": current_time}}
+
+    # Add line_user_id filter if provided
+    if line_user_id:
+        match_stage["line_user_id"] = line_user_id
+
     # Use aggregation pipeline to join collections and filter
     pipeline = [
         # First stage: Match user properties that need aggregation
-        {"$match": {"next_aggregated_at": {"$lte": current_time}}},
+        {"$match": match_stage},
         # Second stage: Group by property_id and preserve line_user_id
         {
             "$group": {
@@ -176,12 +188,26 @@ def get_properties_for_batch() -> List[Dict[str, Any]]:
                 },
                 "url": "$property.url",
                 "line_user_id": 1,  # Use the preserved line_user_id
-                "check_only": {"$literal": False},
+                "check_only": {"$literal": True},
             }
         },
     ]
 
     return list(user_properties_collection.aggregate(pipeline))
+
+
+def check_user_exists(line_user_id: str) -> bool:
+    """Check if a user exists in the database.
+
+    Args:
+        line_user_id: LINE user ID to check
+
+    Returns:
+        bool: True if user exists, False otherwise
+    """
+    db = get_db()
+    users_collection = db[os.getenv("COLLECTION_USERS")]
+    return users_collection.count_documents({"line_user_id": line_user_id}) > 0
 
 
 class BatchHandler(http.server.BaseHTTPRequestHandler):
@@ -190,22 +216,50 @@ class BatchHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         """Handle batch processing requests."""
         try:
+            # Parse query parameters if any
+            from urllib.parse import parse_qs, urlparse
+
+            query_components = parse_qs(urlparse(self.path).query)
+
+            # Get line_user_id from query parameters if present
+            line_user_id = query_components.get("line_user_id", [None])[0]
+            logger.info(f"Processing batch request with line_user_id: {line_user_id}")
+
+            # Check if user exists when line_user_id is provided
+            if line_user_id and not check_user_exists(line_user_id):
+                logger.warning(f"User with LINE ID {line_user_id} not found")
+                self.send_response(404)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(
+                    json.dumps(
+                        {
+                            "status": "error",
+                            "message": f"User with LINE ID {line_user_id} not found",
+                        }
+                    ).encode("utf-8")
+                )
+                return
+
             # Get the topic path from environment
             project_id = os.getenv("GCP_PROJECT_ID")
             topic_id = os.getenv("PUBSUB_TOPIC")
             topic_path = f"projects/{project_id}/topics/{topic_id}"
 
             # Get properties that need processing
-            properties: List[Dict[str, Any]] = get_properties_for_batch()
+            properties = get_properties_for_batch(line_user_id)
 
             if not properties:
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
+                message = "No properties to process"
+                if line_user_id:
+                    message += f" for user {line_user_id}"
                 self.wfile.write(
-                    json.dumps(
-                        {"status": "success", "message": "No properties to process"}
-                    ).encode("utf-8")
+                    json.dumps({"status": "success", "message": message}).encode(
+                        "utf-8"
+                    )
                 )
                 return
 
@@ -216,11 +270,14 @@ class BatchHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
+            message = f"Published messages for {len(properties)} properties"
+            if line_user_id:
+                message += f" for user {line_user_id}"
             self.wfile.write(
                 json.dumps(
                     {
                         "status": "success",
-                        "message": f"Published messages for {len(properties)} properties",
+                        "message": message,
                     }
                 ).encode("utf-8")
             )
@@ -244,11 +301,17 @@ def main():
         # Create server with both handlers
         class CombinedHandler(HealthHandler, BatchHandler):
             def do_POST(self):
-                if self.path == "/health":
+                from urllib.parse import urlparse
+
+                parsed_path = urlparse(self.path).path
+                logger.info(f"Received POST request to path: {parsed_path}")
+
+                if parsed_path == "/health":
                     return HealthHandler.do_POST(self)
-                elif self.path == "/batch":
+                elif parsed_path == "/batch":
                     return BatchHandler.do_POST(self)
                 else:
+                    logger.warning(f"404 Not Found for path: {parsed_path}")
                     self.send_error(404, "Not Found")
 
         server = http.server.HTTPServer(("0.0.0.0", port), CombinedHandler)
