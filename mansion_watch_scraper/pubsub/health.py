@@ -122,11 +122,6 @@ def publish_property_messages(
                 f"Error publishing message for property with URL {prop['url']}: {e}"
             )
 
-    # log successful urls
-    logger.info(
-        f"Published messages for {len(properties)} urls: {[prop['url'] for prop in properties]}"
-    )
-
 
 def get_properties_for_batch(line_user_id: str = None) -> List[Dict[str, Any]]:
     """Get all properties that need to be processed in batch.
@@ -266,6 +261,10 @@ class BatchHandler(http.server.BaseHTTPRequestHandler):
             # Publish messages for each property
             publish_property_messages(properties, topic_path)
 
+            logger.info(
+                f"Published messages for {len(properties)} urls: {[prop['url'] for prop in properties]}"
+            )
+
             # Send success response
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -337,10 +336,9 @@ def get_db():
     Returns:
         pymongo.database.Database: The MongoDB database instance
     """
-    global db
-    if db is None:
+    if "db" not in globals() or globals()["db"] is None:
         init_db()
-    return db
+    return globals()["db"]
 
 
 if __name__ == "__main__":

@@ -1,16 +1,16 @@
 repos:
   - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
+    rev: 6.0.1
     hooks:
       - id: isort
         args: ['.']
 
   - repo: https://github.com/psf/black
-    rev: 24.10.0  # Use the latest version or a specific version
+    rev: 25.1.0  # Use the latest version or a specific version
     hooks:
       - id: black
 
   - repo: https://github.com/pycqa/flake8
-    rev: 7.1.1  # Use the latest version or a specific version
+    rev: 7.2.0  # Use the latest version or a specific version
     hooks:
       - id: flake8
