@@ -50,3 +50,8 @@ seed: ## Seed the database with sample data.
 .PHONY: seed-docker
 seed-docker: ## Seed the database with sample data in the docker container.
 	docker compose exec mansion_watch_scraper python seed.py
+
+.PHONY: scrape-docker
+scrape-docker: ## Run the scraper in the docker container.
+	docker build -t mansion-watch-scraper -f mansion_watch_scraper/pubsub/Dockerfile .
+	docker run -p 8081:8080 --env-file .env.prod mansion-watch-scraper

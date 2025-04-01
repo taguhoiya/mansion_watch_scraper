@@ -6,6 +6,7 @@ import os
 import signal
 import sys
 import time
+from datetime import datetime
 from typing import Any, Dict, Optional, Union
 
 from dotenv import load_dotenv
@@ -110,6 +111,7 @@ def configure_logging():
 class MessageData(BaseModel):
     """Model for message data."""
 
+    timestamp: datetime
     url: str
     line_user_id: str
     check_only: bool = False
