@@ -15,6 +15,7 @@ from app.models.property_overview import (
     PROPERTY_OVERVIEW_TRANSLATION_MAP,
     PropertyOverview,
 )
+from app.services.dates import get_current_time
 from app.services.utils import translate_keys
 from enums.html_element_keys import ElementKeys
 
@@ -288,9 +289,14 @@ class MansionWatchSpider(scrapy.Spider):
 
         self.results = {
             "status": "success",
-            "property_name": property_name,
-            "is_sold": is_redirected_to_library,
-            "url": response.url,
+            "property_info": {
+                "properties": {
+                    "name": property_name,
+                    "url": response.url,
+                    "is_active": not is_redirected_to_library,
+                    "updated_at": get_current_time(),
+                },
+            },
         }
 
     def _log_http_error(
