@@ -50,9 +50,6 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
                 self._send_error(400, "Invalid JSON payload")
                 return
 
-            # Log received message
-            logger.info("Received push message")
-
             # Extract the actual Pub/Sub message from the body
             try:
                 if "message" not in body_json:

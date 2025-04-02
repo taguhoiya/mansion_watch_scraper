@@ -5,8 +5,8 @@ import multiprocessing
 import os
 import signal
 import sys
-import time
 from datetime import datetime
+from threading import Lock
 from typing import Any, Dict, Optional, Union
 
 from dotenv import load_dotenv
@@ -102,10 +102,14 @@ def configure_logging():
         "twisted.internet.asyncioreactor",
         "twisted.internet",
         "asyncio.unix_events",
+        "mansion_watch_scraper.pipelines",  # Add this to control pipeline logs
     ]:
         log = logging.getLogger(logger_name)
         log.setLevel(logging.WARNING)
         log.propagate = False  # Prevent propagation to root logger
+
+    # Set root logger to INFO to exclude DEBUG logs
+    logging.getLogger().setLevel(logging.INFO)
 
 
 class MessageData(BaseModel):
@@ -144,8 +148,6 @@ class PubSubService:
     ):
         """Initialize the service."""
         if not self._initialized:
-            logger.info("Initializing PubSubService...")
-
             # Configure logging first
             configure_logging()
 
@@ -168,6 +170,8 @@ class PubSubService:
             self.subscriber = None
             self.is_running = False
             self._processed_messages = set()
+            self._lock = Lock()  # Add lock for thread safety
+            self._settings = get_project_settings()
 
             # Skip service account check if using emulator
             if not os.getenv("PUBSUB_EMULATOR_HOST"):
@@ -189,7 +193,6 @@ class PubSubService:
 
                 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
 
-            logger.info("PubSubService initialization completed")
             self._initialized = True
 
     def run_spider(
@@ -286,16 +289,13 @@ class PubSubService:
                 logger.error(f"Error message: {results.get('error_message')}")
         elif status == "success":
             property_info = results.get("property_info", {})
-            processing_status = results.get("processing_status", "unknown")
-            properties = property_info.get("properties", {})
-            overviews = property_info.get("property_overviews", {})
+            processing_status = results.get("status", "unknown")
+            property_name = property_info.get("properties", {}).get("name", "unknown")
 
             if processing_status == "stored":
-                logger.info(
-                    f"Successfully stored property: {properties.get('name')} - Price: {overviews.price if hasattr(overviews, 'price') else 'N/A'}"
-                )
+                logger.info(f"Successfully stored property: {property_name} ({url})")
             else:
-                logger.info(f"Successfully checked property: {properties.get('name')}")
+                logger.info(f"Successfully checked property: {property_name} ({url})")
         else:
             logger.warning(f"Unknown status '{status}' for URL: {url}")
 
@@ -303,39 +303,44 @@ class PubSubService:
         self, message: Union[pubsub_v1.subscriber.message.Message, Dict[str, Any]]
     ) -> None:
         """Process a Pub/Sub message."""
-        start_time = time.time()
-
         try:
-            message_id, data = self._extract_message_data(message)
-            logger.info(f"Received message with ID: {message_id}")
+            with self._lock:  # Use lock when processing messages
+                # Decode message data
+                if "data" not in message:
+                    logger.error("No data field in message")
+                    return
 
-            if message_id in self._processed_messages:
-                return
+                message_id, data = self._extract_message_data(message)
+                logger.info(f"Received message with ID: {message_id}")
 
-            self._processed_messages.add(message_id)
-            if len(self._processed_messages) > 1000:
-                self._processed_messages.clear()
+                if message_id in self._processed_messages:
+                    logger.info(f"Message {message_id} already processed, skipping")
+                    return
 
-            try:
-                data_str = data.decode("utf-8") if isinstance(data, bytes) else data
-                data_dict = json.loads(data_str)
-                message_data = MessageData(**data_dict)
-            except Exception as e:
-                logger.error(f"Failed to parse message data: {e}")
-                return
+                self._processed_messages.add(message_id)
+                if len(self._processed_messages) > 1000:
+                    self._processed_messages.clear()
 
-            results = self.run_spider(
-                url=message_data.url,
-                line_user_id=message_data.line_user_id,
-                check_only=message_data.check_only,
-            )
+                try:
+                    data_str = data.decode("utf-8") if isinstance(data, bytes) else data
+                    data_dict = json.loads(data_str)
+                    message_data = MessageData(**data_dict)
+                except Exception as e:
+                    logger.error(f"Failed to parse message data: {e}")
+                    return
 
-            self._handle_spider_results(results, message_data.url)
-            logger.info(f"Message processed in {time.time() - start_time:.2f} seconds")
-            logger.info("Listening for messages...")
+                logger.info(f"Running spider for URL: {message_data.url}")
+                results = self.run_spider(
+                    url=message_data.url,
+                    line_user_id=message_data.line_user_id,
+                    check_only=message_data.check_only,
+                )
+
+                self._handle_spider_results(results, message_data.url)
+                logger.info("Listening for messages...")
 
         except Exception as e:
-            logger.error(f"Error processing message: {e}")
+            logger.error(f"Error processing message: {e}", exc_info=True)
             logger.info("Listening for messages...")
             raise
 
