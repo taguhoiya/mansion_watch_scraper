@@ -106,7 +106,7 @@ class StructuredLogFormatter(logging.Formatter):
         if hasattr(record, "extra_fields"):
             log_dict.update(record.extra_fields)
 
-        return json.dumps(log_dict)
+        return json.dumps(log_dict, ensure_ascii=False)
 
 
 LOGGING_CONFIG = {
@@ -115,14 +115,14 @@ LOGGING_CONFIG = {
     "formatters": {
         "structured": {
             "()": StructuredLogFormatter,
-        },
+        }
     },
     "handlers": {
         "structured": {
             "class": "logging.StreamHandler",
             "formatter": "structured",
             "stream": sys.stdout,
-        },
+        }
     },
     "loggers": {
         "": {  # Root logger
@@ -163,6 +163,37 @@ LOGGING_CONFIG = {
         "google.auth": {  # Google Auth client
             "handlers": ["structured"],
             "level": "WARNING",
+            "propagate": False,
+        },
+        # Add Scrapy loggers to prevent redundant logs
+        "scrapy": {
+            "handlers": ["structured"],
+            "level": "WARNING",  # Only show WARNING and above
+            "propagate": False,
+        },
+        "scrapy.core.engine": {
+            "handlers": ["structured"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "scrapy.core.scraper": {
+            "handlers": ["structured"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "scrapy.spiders": {
+            "handlers": ["structured"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "twisted": {
+            "handlers": ["structured"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "mansion_watch_scraper.spiders.suumo_scraper": {
+            "handlers": ["structured"],
+            "level": "INFO",  # Keep our spider's logs but ensure they're structured
             "propagate": False,
         },
     },

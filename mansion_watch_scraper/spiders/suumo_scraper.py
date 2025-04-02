@@ -1,3 +1,4 @@
+import logging
 import re
 import urllib.parse
 from datetime import datetime, timedelta
@@ -19,6 +20,9 @@ from enums.html_element_keys import ElementKeys
 
 load_dotenv()
 
+# Get logger for this module
+logger = logging.getLogger(__name__)
+
 
 def format_log_message(message: str) -> str:
     """Format log message to be on a single line.
@@ -36,6 +40,30 @@ class MansionWatchSpider(scrapy.Spider):
 
     name = "mansion_watch_scraper"
     allowed_domains = ["suumo.jp"]
+
+    def _log(self, level: str, message: str) -> None:
+        """Use structured logger instead of Scrapy's logger."""
+        getattr(logger, level)(format_log_message(message))
+
+    def log(self, message: str, level: str = "INFO", *args, **kwargs) -> None:
+        """Override Scrapy's log method to use structured logger."""
+        self._log(level.lower(), message)
+
+    def debug(self, message: str, *args, **kwargs) -> None:
+        """Override debug logging to use structured logger."""
+        self._log("debug", message)
+
+    def info(self, message: str, *args, **kwargs) -> None:
+        """Override info logging to use structured logger."""
+        self._log("info", message)
+
+    def warning(self, message: str, *args, **kwargs) -> None:
+        """Override warning logging to use structured logger."""
+        self._log("warning", message)
+
+    def error(self, message: str, *args, **kwargs) -> None:
+        """Override error logging to use structured logger."""
+        self._log("error", message)
 
     def __init__(
         self,
@@ -71,7 +99,7 @@ class MansionWatchSpider(scrapy.Spider):
     def start_requests(self):
         """Start the scraping requests with error handling."""
         for url in self.start_urls:
-            self.logger.info(format_log_message(f"Making request to URL: {url}"))
+            self.log(f"Making request to URL: {url}")
             yield scrapy.Request(
                 url=url,
                 callback=self.parse,
@@ -96,11 +124,7 @@ class MansionWatchSpider(scrapy.Spider):
         error_msg = str(failure.value)
         url = failure.request.url
 
-        self.logger.error(
-            format_log_message(
-                f"Request failed for URL {url}: {error_type} - {error_msg}"
-            )
-        )
+        self.error(f"Request failed for URL {url}: {error_type} - {error_msg}")
 
         if hasattr(failure.value, "response") and failure.value.response is not None:
             status = failure.value.response.status
@@ -112,8 +136,8 @@ class MansionWatchSpider(scrapy.Spider):
                 error_msg = (
                     "Server error (500). The property site is experiencing issues."
                 )
-            self.logger.error(format_log_message(f"HTTP Status Code: {status}"))
-            self.logger.error(format_log_message(error_msg))
+            self.error(f"HTTP Status Code: {status}")
+            self.error(format_log_message(error_msg))
 
         self.results = {
             "status": "error",
@@ -125,11 +149,7 @@ class MansionWatchSpider(scrapy.Spider):
 
     def parse(self, response):
         """Parse the response and handle any HTTP errors."""
-        self.logger.info(
-            format_log_message(
-                f"Received response from {response.url} with status {response.status}"
-            )
-        )
+        self.log(f"Received response from {response.url} with status {response.status}")
 
         try:
             if response.status != 200:
@@ -155,10 +175,8 @@ class MansionWatchSpider(scrapy.Spider):
                 # First get the property ID from the database
                 property_item = self._extract_property_info(response)
                 if not property_item:
-                    self.logger.error(
-                        format_log_message(
-                            f"Failed to extract property information: {response.url}"
-                        )
+                    self.error(
+                        f"Failed to extract property information: {response.url}"
                     )
                     return
 
@@ -188,11 +206,7 @@ class MansionWatchSpider(scrapy.Spider):
 
             property_item = self._extract_property_info(response)
             if not property_item:
-                self.logger.error(
-                    format_log_message(
-                        f"Failed to extract property information: {response.url}"
-                    )
-                )
+                self.error(f"Failed to extract property information: {response.url}")
                 return
 
             current_time = datetime.now()
@@ -210,11 +224,7 @@ class MansionWatchSpider(scrapy.Spider):
                 "next_aggregated_at": current_time + timedelta(days=3),
             }
 
-            self.logger.info(
-                format_log_message(
-                    f"Successfully scraped property: {property_item.name}"
-                )
-            )
+            self.log(f"Successfully scraped property: {property_item.name}")
 
             yield {
                 "properties": property_item.model_dump(),
@@ -225,11 +235,7 @@ class MansionWatchSpider(scrapy.Spider):
             }
 
         except Exception as e:
-            self.logger.error(
-                format_log_message(
-                    f"Error in parse method. url: {response.url}, error: {e}"
-                )
-            )
+            self.error(f"Error in parse method. url: {response.url}, error: {e}")
             self.results = {
                 "status": "error",
                 "error_type": e.__class__.__name__,
@@ -266,7 +272,7 @@ class MansionWatchSpider(scrapy.Spider):
         property_name = self._extract_property_name(response)
         if not property_name:
             error_msg = "Property name not found in response"
-            self.logger.error(format_log_message(error_msg))
+            self.error(format_log_message(error_msg))
             self.results = {
                 "status": "error",
                 "error_type": "ParseError",
@@ -297,27 +303,23 @@ class MansionWatchSpider(scrapy.Spider):
             context: Context dictionary
             error: Error object
         """
-        self.logger.error(
-            format_log_message(f"{error.__class__.__name__} on %s"), context["url"]
-        )
+        self.error(f"{error.__class__.__name__} on {context['url']}")
         if "status_code" in context:
-            self.logger.error(
-                format_log_message("HTTP Status Code: %s"), context["status_code"]
-            )
+            self.error(f"HTTP Status Code: {context['status_code']}")
             if context["status_code"] == 403:
-                self.logger.error(
+                self.error(
                     format_log_message(
                         "Access forbidden (403). The site may be blocking scrapers."
                     )
                 )
             elif context["status_code"] == 500:
-                self.logger.error(
+                self.error(
                     format_log_message(
                         "Server error (500). The property site is experiencing issues."
                     )
                 )
             elif context["status_code"] == 404:
-                self.logger.info(
+                self.info(
                     format_log_message(
                         "Property not found (404). The URL may be incorrect or the property listing may have been removed."
                     )
@@ -448,7 +450,7 @@ class MansionWatchSpider(scrapy.Spider):
                     content = re.sub(r"\s+", " ", content).strip()
                     return content
 
-        self.logger.warning(
+        self.warning(
             format_log_message(
                 f"Failed to extract small property description. url: {response.url}, tried_selectors: {selectors}"
             )
@@ -470,10 +472,8 @@ class MansionWatchSpider(scrapy.Spider):
         )
 
         if is_redirected_to_library:
-            self.logger.info(
-                format_log_message(
-                    f"Skipping image extraction for sold-out property. url: {response.url}, original_url: {original_url}"
-                )
+            self.log(
+                f"Skipping image extraction for sold-out property. url: {response.url}, original_url: {original_url}"
             )
             return []
 
@@ -488,13 +488,11 @@ class MansionWatchSpider(scrapy.Spider):
 
         # Step 4: Log results
         if image_urls:
-            self.logger.info(
-                format_log_message(
-                    f"Successfully extracted image URLs. url: {response.url}, image_count: {len(image_urls)}, patterns_used: {xpath_patterns}"
-                )
+            self.log(
+                f"Successfully extracted image URLs. url: {response.url}, image_count: {len(image_urls)}, patterns_used: {xpath_patterns}"
             )
         else:
-            self.logger.warning(
+            self.warning(
                 format_log_message(
                     f"No image URLs found for active property. url: {response.url}, patterns_tried: {xpath_patterns}"
                 )
@@ -533,7 +531,7 @@ class MansionWatchSpider(scrapy.Spider):
                 # Remove duplicates while preserving order
                 return list(dict.fromkeys(urls))
 
-        self.logger.warning(
+        self.warning(
             format_log_message(
                 f"No images found with any pattern. patterns_tried: {patterns}"
             )
@@ -571,7 +569,7 @@ class MansionWatchSpider(scrapy.Spider):
             # Otherwise, construct the resizeImage URL
             return f"https://img01.suumo.com/jj/resizeImage?src={src_param}"
         except Exception as e:
-            self.logger.error(
+            self.error(
                 format_log_message(
                     f"Error processing URL from hidden input. image_url: {image_url}, error: {e}"
                 )
@@ -792,12 +790,12 @@ class MansionWatchSpider(scrapy.Spider):
             url: The URL of the page
         """
         if not property_name:
-            self.logger.error(
+            self.error(
                 format_log_message(
                     f"Property name not found in the response. url: {url}"
                 )
             )
-            self.logger.error(
+            self.error(
                 format_log_message(
                     "This may indicate that the page doesn't contain property information "
                     "or has a different structure."
@@ -820,11 +818,8 @@ class MansionWatchSpider(scrapy.Spider):
             and response.url != original_url
             and "/library/" in response.url
         ):
-            self.logger.info(
-                format_log_message(
-                    f"Detected redirect to library page (likely sold-out property). "
-                    f"original_url: {original_url}, redirected_url: {response.url}"
-                )
+            self.log(
+                f"Detected redirect to library page (likely sold-out property). original_url: {original_url}, redirected_url: {response.url}"
             )
             return True
         return False
@@ -848,9 +843,7 @@ class MansionWatchSpider(scrapy.Spider):
             # Extract property name from title
             title = response.xpath("//title/text()").get()
             if not title:
-                self.logger.error(
-                    format_log_message(f"Failed to extract title: {response.url}")
-                )
+                self.error(f"Failed to extract title: {response.url}")
                 return None
 
             # Extract property name from title (format: "【SUUMO】PropertyName 中古マンション物件情報")
@@ -860,11 +853,7 @@ class MansionWatchSpider(scrapy.Spider):
 
             # Handle library page (sold-out property)
             if is_redirected_to_library:
-                self.logger.info(
-                    format_log_message(
-                        f"Creating sold-out property object for: {response.url}"
-                    )
-                )
+                self.log(f"Creating sold-out property object for: {response.url}")
                 return Property(
                     name=f"{property_name or '物件名不明'} (売却済み)",
                     url=response.url,
@@ -884,7 +873,7 @@ class MansionWatchSpider(scrapy.Spider):
                 "//h1[contains(@class, 'mainIndex') and (contains(@class, 'mainIndexK') or contains(@class, 'mainIndexR'))]/text()"
             ).get()
             if not price_text:
-                self.logger.error(
+                self.error(
                     format_log_message(
                         f"Failed to extract price from h1 tag. url: {response.url}"
                     )
@@ -894,7 +883,7 @@ class MansionWatchSpider(scrapy.Spider):
             # Extract price value (format: "PropertyName 7880万円（1LDK）")
             price_match = re.search(r"(\d+)万円", price_text)
             if not price_match:
-                self.logger.error(
+                self.error(
                     format_log_message(
                         f"Failed to extract price value. url: {response.url}, price_text: {price_text}"
                     )
@@ -908,7 +897,7 @@ class MansionWatchSpider(scrapy.Spider):
                 "//td[preceding-sibling::th/div[contains(text(), '所在地')]]/text()"
             ).get()
             if not address:
-                self.logger.error(
+                self.error(
                     format_log_message(
                         f"Failed to extract property address. url: {response.url}"
                     )
@@ -939,7 +928,7 @@ class MansionWatchSpider(scrapy.Spider):
             return property_obj
 
         except Exception as e:
-            self.logger.error(
+            self.error(
                 format_log_message(
                     f"Error extracting property info. url: {response.url}, error: {e}"
                 )
