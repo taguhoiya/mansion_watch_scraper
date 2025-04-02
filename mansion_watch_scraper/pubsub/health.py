@@ -86,7 +86,7 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
         )
 
 
-def publish_property_messages(
+def publish_property_messages_for_batch(
     properties: List[Dict[str, Any]], topic_path: str
 ) -> None:
     """Publish messages for each property to PubSub topic.
@@ -105,7 +105,7 @@ def publish_property_messages(
                 "timestamp": current_time.isoformat(),  # Convert datetime to ISO format string
                 "url": prop["url"],
                 "line_user_id": prop["line_user_id"],
-                "check_only": True,
+                "check_only": True,  # Always True because this method is called when batch updating all props on the UI and using a batch job
             }
 
             # Publish message
@@ -205,32 +205,45 @@ def check_user_exists(line_user_id: str) -> bool:
 class BatchHandler(http.server.BaseHTTPRequestHandler):
     """Handler for batch processing requests."""
 
+    def _send_error(self, status_code: int, message: str) -> None:
+        """Send an error response."""
+        self.send_response(status_code)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(
+            json.dumps({"status": "error", "message": message}).encode("utf-8")
+        )
+
     def do_POST(self):
-        """Handle batch processing requests."""
+        """Handle batch processing requests with JSON payload."""
         try:
-            # Parse query parameters if any
-            from urllib.parse import parse_qs, urlparse
+            # Validate Content-Type header
+            content_type = self.headers.get("Content-Type", "")
+            if content_type != "application/json":
+                logger.error(f"Invalid Content-Type: {content_type}")
+                self._send_error(400, "Content-Type must be application/json")
+                return
 
-            query_components = parse_qs(urlparse(self.path).query)
+            # Read and parse JSON payload
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length == 0:
+                self._send_error(400, "Missing request body")
+                return
 
-            # Get line_user_id from query parameters if present
-            line_user_id = query_components.get("line_user_id", [None])[0]
-            logger.info(f"Processing batch request with line_user_id: {line_user_id}")
+            try:
+                payload = json.loads(self.rfile.read(content_length))
+            except json.JSONDecodeError:
+                logger.error("Invalid JSON payload")
+                self._send_error(400, "Invalid JSON payload")
+                return
+
+            line_user_id = payload.get("line_user_id")
+            logger.info(f"Processing request for line_user_id: {line_user_id}")
 
             # Check if user exists when line_user_id is provided
             if line_user_id and not check_user_exists(line_user_id):
                 logger.warning(f"User with LINE ID {line_user_id} not found")
-                self.send_response(404)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(
-                    json.dumps(
-                        {
-                            "status": "error",
-                            "message": f"User with LINE ID {line_user_id} not found",
-                        }
-                    ).encode("utf-8")
-                )
+                self._send_error(404, f"User with LINE ID {line_user_id} not found")
                 return
 
             # Get the topic path from environment
@@ -238,25 +251,22 @@ class BatchHandler(http.server.BaseHTTPRequestHandler):
             topic_id = os.getenv("PUBSUB_TOPIC")
             topic_path = f"projects/{project_id}/topics/{topic_id}"
 
-            # Get properties that need processing
+            # Get properties to process
             properties = get_properties_for_batch(line_user_id)
-
             if not properties:
+                logger.info("No properties to process")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                message = "No properties to process"
-                if line_user_id:
-                    message += f" for user {line_user_id}"
                 self.wfile.write(
-                    json.dumps({"status": "success", "message": message}).encode(
-                        "utf-8"
-                    )
+                    json.dumps(
+                        {"status": "success", "message": "No properties to process"}
+                    ).encode("utf-8")
                 )
                 return
 
             # Publish messages for each property
-            publish_property_messages(properties, topic_path)
+            publish_property_messages_for_batch(properties, topic_path)
 
             logger.info(
                 f"Published messages for {len(properties)} urls: {[prop['url'] for prop in properties]}"
@@ -266,20 +276,18 @@ class BatchHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            message = f"Published messages for {len(properties)} properties"
-            if line_user_id:
-                message += f" for user {line_user_id}"
             self.wfile.write(
                 json.dumps(
                     {
                         "status": "success",
-                        "message": message,
+                        "message": f"Batch processing started for {len(properties)} properties",
+                        "properties": len(properties),
                     }
                 ).encode("utf-8")
             )
 
         except Exception as e:
-            logger.error(f"Error in batch processing: {e}")
+            logger.error(f"Error processing batch request: {e}", exc_info=True)
             self._send_error(500, f"Internal server error: {str(e)}")
 
 
