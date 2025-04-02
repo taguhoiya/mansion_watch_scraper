@@ -125,9 +125,8 @@ class MansionWatchSpider(scrapy.Spider):
         error_msg = str(failure.value)
         url = failure.request.url
 
-        self.error(f"Request failed for URL {url}: {error_type} - {error_msg}")
-
         if hasattr(failure.value, "response") and failure.value.response is not None:
+            url = failure.value.response.url
             status = failure.value.response.status
             if status == 404:
                 error_msg = "Property not found (404). The URL may be incorrect or the property listing may have been removed."
@@ -137,8 +136,11 @@ class MansionWatchSpider(scrapy.Spider):
                 error_msg = (
                     "Server error (500). The property site is experiencing issues."
                 )
+            self.error(f"Request failed for URL {url}: {error_type} - {error_msg}")
             self.error(f"HTTP Status Code: {status}")
             self.error(format_log_message(error_msg))
+        else:
+            self.error(f"Request failed for URL {url}: {error_type} - {error_msg}")
 
         self.results = {
             "status": "error",

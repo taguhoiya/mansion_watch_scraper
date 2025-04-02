@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 from scrapy.http import Request, Response
@@ -64,7 +64,7 @@ class TestMansionWatchSpider:
         assert "https://suumo.jp/images/property3.jpg" in result
         assert "https://suumo.jp/images/property4.jpg" in result
 
-    @patch("mansion_watch_scraper.spiders.suumo_scraper.MansionWatchSpider.logger")
+    @patch("mansion_watch_scraper.spiders.suumo_scraper.logger")
     def test_errback_httpbin_404(self, mock_logger, spider):
         """Test the errback_httpbin method with a 404 error."""
         # Create a mock response with a 404 status
@@ -84,11 +84,19 @@ class TestMansionWatchSpider:
         spider.errback_httpbin(mock_failure)
 
         # Assert that the error was logged
-        mock_logger.error.assert_called_with(
-            "Property not found (404). The URL may be incorrect or the property listing may have been removed."
+        mock_logger.error.assert_has_calls(
+            [
+                call(
+                    "Request failed for URL https://example.com/not_found: HttpError - Property not found (404). The URL may be incorrect or the property listing may have been removed."
+                ),
+                call("HTTP Status Code: 404"),
+                call(
+                    "Property not found (404). The URL may be incorrect or the property listing may have been removed."
+                ),
+            ]
         )
 
-    @patch("mansion_watch_scraper.spiders.suumo_scraper.MansionWatchSpider.logger")
+    @patch("mansion_watch_scraper.spiders.suumo_scraper.logger")
     def test_errback_httpbin_403(self, mock_logger, spider):
         """Test the errback_httpbin method with a 403 error."""
         # Create a mock response with a 403 status
@@ -108,11 +116,17 @@ class TestMansionWatchSpider:
         spider.errback_httpbin(mock_failure)
 
         # Assert that the error was logged
-        mock_logger.error.assert_called_with(
-            "Access forbidden (403). The site may be blocking scrapers."
+        mock_logger.error.assert_has_calls(
+            [
+                call(
+                    "Request failed for URL https://example.com/forbidden: HttpError - Access forbidden (403). The site may be blocking scrapers."
+                ),
+                call("HTTP Status Code: 403"),
+                call("Access forbidden (403). The site may be blocking scrapers."),
+            ]
         )
 
-    @patch("mansion_watch_scraper.spiders.suumo_scraper.MansionWatchSpider.logger")
+    @patch("mansion_watch_scraper.spiders.suumo_scraper.logger")
     def test_errback_httpbin_500(self, mock_logger, spider):
         """Test the errback_httpbin method with a 500 error."""
         # Create a mock response with a 500 status
@@ -132,11 +146,17 @@ class TestMansionWatchSpider:
         spider.errback_httpbin(mock_failure)
 
         # Assert that the error was logged
-        mock_logger.error.assert_called_with(
-            "Server error (500). The property site is experiencing issues."
+        mock_logger.error.assert_has_calls(
+            [
+                call(
+                    "Request failed for URL https://example.com/server_error: HttpError - Server error (500). The property site is experiencing issues."
+                ),
+                call("HTTP Status Code: 500"),
+                call("Server error (500). The property site is experiencing issues."),
+            ]
         )
 
-    @patch("mansion_watch_scraper.spiders.suumo_scraper.MansionWatchSpider.logger")
+    @patch("mansion_watch_scraper.spiders.suumo_scraper.logger")
     def test_errback_httpbin_dns_lookup_error(self, mock_logger, spider):
         """Test the errback_httpbin method with a DNSLookupError."""
         # Create a mock request
@@ -153,12 +173,12 @@ class TestMansionWatchSpider:
         # Call the errback method
         spider.errback_httpbin(mock_failure)
 
-        # Assert that the error was logged with the formatted message
+        # Assert that the error was logged
         mock_logger.error.assert_called_with(
             "Request failed for URL https://nonexistent.example.com: DNSLookupError - Could not resolve domain name"
         )
 
-    @patch("mansion_watch_scraper.spiders.suumo_scraper.MansionWatchSpider.logger")
+    @patch("mansion_watch_scraper.spiders.suumo_scraper.logger")
     def test_errback_httpbin_timeout_error(self, mock_logger, spider):
         """Test the errback_httpbin method with a TimeoutError."""
         # Create a mock request
@@ -178,7 +198,7 @@ class TestMansionWatchSpider:
         # Call the errback method
         spider.errback_httpbin(mock_failure)
 
-        # Assert that the error was logged with the formatted message
+        # Assert that the error was logged
         mock_logger.error.assert_called_with(
             "Request failed for URL https://slow.example.com: TimeoutError - Request timed out"
         )
