@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from scrapy.http import Request, Response
@@ -74,26 +74,17 @@ class TestMansionWatchSpider:
 
         # Create a mock failure with an HttpError
         mock_failure = MagicMock()
-        mock_failure.check.return_value = (
-            True  # This will make failure.check(HttpError) return True
-        )
+        mock_failure.check.return_value = True
         mock_failure.value.response = mock_response
         mock_failure.type = type("HttpError", (), {"__name__": "HttpError"})
 
         # Call the errback method
         spider.errback_httpbin(mock_failure)
 
-        # Assert that the error was logged
-        mock_logger.error.assert_has_calls(
-            [
-                call(
-                    "Request failed for URL https://example.com/not_found: HttpError - Property not found (404). The URL may be incorrect or the property listing may have been removed."
-                ),
-                call("HTTP Status Code: 404"),
-                call(
-                    "Property not found (404). The URL may be incorrect or the property listing may have been removed."
-                ),
-            ]
+        # Assert that the error was logged with the new format
+        mock_logger.error.assert_called_once_with(
+            "HttpError on https://example.com/not_found - Status 404: Property not found (404). The URL may be incorrect or the property listing may have been removed.",
+            extra={"operation": "http_error"},
         )
 
     @patch("mansion_watch_scraper.spiders.suumo_scraper.logger")
@@ -106,24 +97,17 @@ class TestMansionWatchSpider:
 
         # Create a mock failure with an HttpError
         mock_failure = MagicMock()
-        mock_failure.check.return_value = (
-            True  # This will make failure.check(HttpError) return True
-        )
+        mock_failure.check.return_value = True
         mock_failure.value.response = mock_response
         mock_failure.type = type("HttpError", (), {"__name__": "HttpError"})
 
         # Call the errback method
         spider.errback_httpbin(mock_failure)
 
-        # Assert that the error was logged
-        mock_logger.error.assert_has_calls(
-            [
-                call(
-                    "Request failed for URL https://example.com/forbidden: HttpError - Access forbidden (403). The site may be blocking scrapers."
-                ),
-                call("HTTP Status Code: 403"),
-                call("Access forbidden (403). The site may be blocking scrapers."),
-            ]
+        # Assert that the error was logged with the new format
+        mock_logger.error.assert_called_once_with(
+            "HttpError on https://example.com/forbidden - Status 403: Access forbidden (403). The site may be blocking scrapers.",
+            extra={"operation": "http_error"},
         )
 
     @patch("mansion_watch_scraper.spiders.suumo_scraper.logger")
@@ -136,24 +120,17 @@ class TestMansionWatchSpider:
 
         # Create a mock failure with an HttpError
         mock_failure = MagicMock()
-        mock_failure.check.return_value = (
-            True  # This will make failure.check(HttpError) return True
-        )
+        mock_failure.check.return_value = True
         mock_failure.value.response = mock_response
         mock_failure.type = type("HttpError", (), {"__name__": "HttpError"})
 
         # Call the errback method
         spider.errback_httpbin(mock_failure)
 
-        # Assert that the error was logged
-        mock_logger.error.assert_has_calls(
-            [
-                call(
-                    "Request failed for URL https://example.com/server_error: HttpError - Server error (500). The property site is experiencing issues."
-                ),
-                call("HTTP Status Code: 500"),
-                call("Server error (500). The property site is experiencing issues."),
-            ]
+        # Assert that the error was logged with the new format
+        mock_logger.error.assert_called_once_with(
+            "HttpError on https://example.com/server_error - Status 500: Server error (500). The property site is experiencing issues.",
+            extra={"operation": "http_error"},
         )
 
     @patch("mansion_watch_scraper.spiders.suumo_scraper.logger")
@@ -173,9 +150,10 @@ class TestMansionWatchSpider:
         # Call the errback method
         spider.errback_httpbin(mock_failure)
 
-        # Assert that the error was logged
-        mock_logger.error.assert_called_with(
-            "Request failed for URL https://nonexistent.example.com: DNSLookupError - Could not resolve domain name"
+        # Assert that the error was logged with the new format
+        mock_logger.error.assert_called_once_with(
+            "Request failed for https://nonexistent.example.com: DNSLookupError - Could not resolve domain name",
+            extra={"operation": "request_error"},
         )
 
     @patch("mansion_watch_scraper.spiders.suumo_scraper.logger")
@@ -198,7 +176,8 @@ class TestMansionWatchSpider:
         # Call the errback method
         spider.errback_httpbin(mock_failure)
 
-        # Assert that the error was logged
-        mock_logger.error.assert_called_with(
-            "Request failed for URL https://slow.example.com: TimeoutError - Request timed out"
+        # Assert that the error was logged with the new format
+        mock_logger.error.assert_called_once_with(
+            "Request failed for https://slow.example.com: TimeoutError - Request timed out",
+            extra={"operation": "request_error"},
         )
