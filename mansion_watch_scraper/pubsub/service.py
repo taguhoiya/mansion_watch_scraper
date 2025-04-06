@@ -6,6 +6,7 @@ import os
 import signal
 import sys
 from datetime import datetime
+from logging import LoggerAdapter
 from threading import Lock
 from typing import Any, Dict, Optional, Union
 
@@ -28,10 +29,22 @@ load_dotenv()
 # Get logger for this module
 logger = logging.getLogger(__name__)
 
+# Configure structured logging
+logger = LoggerAdapter(
+    logger,
+    {
+        "component": "pubsub_service",
+        "operation": "message_processing",  # Default operation for this service
+    },
+)
+
 # Check if using local emulator
 PUBSUB_EMULATOR_HOST = os.getenv("PUBSUB_EMULATOR_HOST")
 if PUBSUB_EMULATOR_HOST:
-    logger.info(f"Using Pub/Sub emulator at {PUBSUB_EMULATOR_HOST}")
+    logger.info(
+        f"Using Pub/Sub emulator at {PUBSUB_EMULATOR_HOST}",
+        extra={"operation": "service_init"},
+    )
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = ""  # Not needed for emulator
 
 
@@ -307,14 +320,26 @@ class PubSubService:
             with self._lock:  # Use lock when processing messages
                 # Decode message data
                 if "data" not in message:
-                    logger.error("No data field in message")
+                    logger.error(
+                        "No data field in message",
+                        extra={"operation": "message_validation"},
+                    )
                     return
 
                 message_id, data = self._extract_message_data(message)
-                logger.info(f"Received message with ID: {message_id}")
+                logger.info(
+                    f"Received message with ID: {message_id}",
+                    extra={"operation": "message_received", "message_id": message_id},
+                )
 
                 if message_id in self._processed_messages:
-                    logger.info(f"Message {message_id} already processed, skipping")
+                    logger.info(
+                        f"Message {message_id} already processed, skipping",
+                        extra={
+                            "operation": "message_deduplication",
+                            "message_id": message_id,
+                        },
+                    )
                     return
 
                 self._processed_messages.add(message_id)
@@ -329,7 +354,15 @@ class PubSubService:
                     logger.error(f"Failed to parse message data: {e}")
                     return
 
-                logger.info(f"Running spider for URL: {message_data.url}")
+                logger.info(
+                    f"Running spider for URL: {message_data.url}",
+                    extra={
+                        "operation": "spider_start",
+                        "message_id": message_id,
+                        "url": message_data.url,
+                        "line_user_id": message_data.line_user_id,
+                    },
+                )
                 results = self.run_spider(
                     url=message_data.url,
                     line_user_id=message_data.line_user_id,
@@ -340,7 +373,16 @@ class PubSubService:
                 logger.info("Listening for messages...")
 
         except Exception as e:
-            logger.error(f"Error processing message: {e}", exc_info=True)
+            logger.error(
+                "Error processing message",
+                extra={
+                    "operation": "message_error",
+                    "message_id": message_id,
+                    "error": str(e),
+                    "error_type": e.__class__.__name__,
+                },
+                exc_info=True,
+            )
             logger.info("Listening for messages...")
             raise
 
