@@ -3,6 +3,7 @@
 import logging
 import os
 import time
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 
@@ -57,6 +58,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
     ) -> JSONResponse:
         """Process the request and log information."""
         start_time = time.time()
+        request_id = str(uuid.uuid4())  # Generate unique request ID
         try:
             # Extract trace context
             trace_header = request.headers.get("X-Cloud-Trace-Context")
@@ -68,6 +70,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                     "Processing request",
                     extra={
                         "trace": trace_id,
+                        "request_id": request_id,
                         "method": request.method,
                         "path": request.url.path,
                     },
@@ -78,6 +81,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
             # Log response with trace context if available
             log_extra = {
+                "request_id": request_id,
                 "method": request.method,
                 "path": request.url.path,
                 "status_code": response.status_code,
@@ -92,11 +96,15 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             )
 
             response.headers["X-Process-Time"] = str(process_time)
+            response.headers["X-Request-ID"] = (
+                request_id  # Add request ID to response headers
+            )
             return response
 
         except Exception as e:
             # Log error with trace context if available
             log_extra = {
+                "request_id": request_id,
                 "method": request.method,
                 "path": request.url.path,
                 "error": str(e),

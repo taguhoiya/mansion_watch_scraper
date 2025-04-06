@@ -1,5 +1,6 @@
 import json
 import logging.config
+import os
 import sys
 
 from pydantic_settings import BaseSettings
@@ -67,6 +68,7 @@ class StructuredLogFormatter(logging.Formatter):
     def __init__(self):
         super().__init__()
         self.project_id = settings.GCP_PROJECT_ID
+        self.service_name = settings.PROJECT_NAME
 
     def format(self, record):
         """Format log record as JSON."""
@@ -75,9 +77,24 @@ class StructuredLogFormatter(logging.Formatter):
 
         # Basic structured log entry
         log_dict = {
-            "time": self.formatTime(record),  # Add timestamp
-            "severity": severity,  # Use GCP severity levels
-            "message": message,  # Main display field
+            "time": self.formatTime(record),
+            "severity": severity,
+            "message": message,
+            "component": getattr(record, "component", "unknown"),
+            "operation": getattr(record, "operation", "unknown"),
+            "user_id": getattr(record, "user_id", None),
+            "url": getattr(record, "url", None),
+            "labels": {
+                "service": self.service_name,
+                "environment": settings.ENV,
+                "component": getattr(record, "component", "unknown"),
+            },
+        }
+
+        # Add service context for better error grouping
+        log_dict["serviceContext"] = {
+            "service": self.service_name,
+            "version": os.getenv("SERVICE_VERSION", "unknown"),
         }
 
         # Add trace and span if available
@@ -97,10 +114,36 @@ class StructuredLogFormatter(logging.Formatter):
 
         # Add error info if present
         if record.exc_info:
+            exc_type, exc_value, tb = record.exc_info
             log_dict["@type"] = (
                 "type.googleapis.com/google.devtools.clouderrorreporting.v1beta1.ReportedErrorEvent"
             )
-            log_dict["error"] = self.formatException(record.exc_info)
+
+            # Enhanced error context
+            log_dict["error"] = {
+                "type": exc_type.__name__,
+                "message": str(exc_value),
+                "stackTrace": self.formatException(record.exc_info),
+            }
+
+            # Add context for better error grouping
+            log_dict["context"] = {
+                "reportLocation": {
+                    "filePath": record.pathname,
+                    "lineNumber": record.lineno,
+                    "functionName": record.funcName,
+                },
+                "user": getattr(record, "user_id", None),
+                "httpRequest": (
+                    {
+                        "url": getattr(record, "url", None),
+                        "method": getattr(record, "http_method", None),
+                        "status": getattr(record, "http_status", None),
+                    }
+                    if hasattr(record, "url")
+                    else None
+                ),
+            }
 
         # Add any extra fields from the record
         if hasattr(record, "extra_fields"):

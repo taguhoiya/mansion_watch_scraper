@@ -120,11 +120,28 @@ CLOSESPIDER_PAGECOUNT = 1  # Only scrape one page since we're checking single UR
 MONGO_DATABASE = "mansion_watch"
 MONGO_URI = os.getenv("MONGO_URI")
 
-# Configure logging to be minimal
+# Configure logging to be compatible with Google Cloud Logging
 LOG_ENABLED = True
 LOG_LEVEL = "INFO"
-LOG_FORMAT = '{"time": "%(asctime)s", "severity": "%(levelname)s", "message": "%(message)s", "logging.googleapis.com/sourceLocation": {"file": "%(pathname)s", "line": %(lineno)d, "function": "%(funcName)s"}}'
-LOG_DATEFORMAT = "%Y-%m-%d %H:%M:%S,000"
+LOG_FORMAT = """{
+    "time": "%(asctime)s",
+    "severity": "%(levelname)s",
+    "message": "%(message)s",
+    "logging.googleapis.com/sourceLocation": {
+        "file": "%(pathname)s",
+        "line": %(lineno)d,
+        "function": "%(funcName)s"
+    },
+    "logging.googleapis.com/labels": {
+        "spider": "%(spider)s",
+        "component": "scrapy"
+    },
+    "serviceContext": {
+        "service": "mansion-watch-scraper",
+        "version": "1.0"
+    }
+}"""
+LOG_DATEFORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"  # ISO 8601 format
 LOG_SHORT_NAMES = True
 LOG_STDOUT = False
 LOG_FILE = None
