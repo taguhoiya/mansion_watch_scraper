@@ -388,7 +388,7 @@ class BatchHandler(http.server.BaseHTTPRequestHandler):
             topic_path = f"projects/{project_id}/topics/{topic_id}"
 
             # Publish messages for each property
-            # publish_property_messages_for_batch(properties, topic_path)
+            publish_property_messages_for_batch(properties, topic_path)
 
             urls = [prop["url"] for prop in properties]
             url_count = len(urls)
