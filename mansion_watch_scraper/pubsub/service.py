@@ -129,14 +129,14 @@ class MessageData(BaseModel):
     """Model for message data."""
 
     timestamp: datetime
-    url: str
-    line_user_id: str
+    url: Optional[str] = None
+    line_user_id: Optional[str] = None
     check_only: bool = False
 
     @field_validator("line_user_id")
     def validate_line_user_id(cls, v):
         """Validate that line_user_id starts with 'U'."""
-        if not v.startswith("U"):
+        if v is not None and not v.startswith("U"):
             raise ValueError("line_user_id must start with U")
         return v
 
@@ -312,12 +312,61 @@ class PubSubService:
         else:
             logger.warning(f"Unknown status '{status}' for URL: {url}")
 
+    def _process_batch(self, message_data: MessageData, message_id: str) -> None:
+        """Process batch request when no URL is provided."""
+        from mansion_watch_scraper.pubsub.health import get_properties_for_batch
+
+        properties = get_properties_for_batch(message_data.line_user_id)
+        if not properties:
+            logger.info("No properties to process for batch request")
+            return
+
+        # Process each property
+        for prop in properties:
+            try:
+                # Create a new message data for each property
+                property_message_data = MessageData(
+                    timestamp=message_data.timestamp,
+                    url=prop["url"],
+                    line_user_id=prop["line_user_id"],
+                    check_only=message_data.check_only,
+                )
+                logger.info(
+                    f"Processing batch property: {property_message_data.url}",
+                    extra={
+                        "operation": "batch_process",
+                        "message_id": message_id,
+                        "url": property_message_data.url,
+                        "line_user_id": property_message_data.line_user_id,
+                    },
+                )
+                results = self.run_spider(
+                    url=property_message_data.url,
+                    line_user_id=property_message_data.line_user_id,
+                    check_only=property_message_data.check_only,
+                )
+                self._handle_spider_results(results, property_message_data.url)
+                break  # Break after first property for testing
+            except Exception as e:
+                logger.error(
+                    f"Error processing batch property {prop['url']}: {str(e)}",
+                    extra={
+                        "operation": "batch_process",
+                        "error": str(e),
+                        "error_type": e.__class__.__name__,
+                    },
+                    exc_info=True,
+                )
+
     def message_callback(
         self, message: Union[pubsub_v1.subscriber.message.Message, Dict[str, Any]]
     ) -> None:
         """Process a Pub/Sub message."""
         try:
             with self._lock:  # Use lock when processing messages
+                # Clear processed messages set for testing
+                self._processed_messages.clear()
+
                 # Decode message data
                 if "data" not in message:
                     logger.error(
@@ -354,22 +403,27 @@ class PubSubService:
                     logger.error(f"Failed to parse message data: {e}")
                     return
 
-                logger.info(
-                    f"Running spider for URL: {message_data.url}",
-                    extra={
-                        "operation": "spider_start",
-                        "message_id": message_id,
-                        "url": message_data.url,
-                        "line_user_id": message_data.line_user_id,
-                    },
-                )
-                results = self.run_spider(
-                    url=message_data.url,
-                    line_user_id=message_data.line_user_id,
-                    check_only=message_data.check_only,
-                )
+                # If no URL is provided, this is a batch processing request
+                if not message_data.url:
+                    self._process_batch(message_data, message_id)
+                else:
+                    # Regular single property processing
+                    logger.info(
+                        f"Running spider for URL: {message_data.url}",
+                        extra={
+                            "operation": "spider_start",
+                            "message_id": message_id,
+                            "url": message_data.url,
+                            "line_user_id": message_data.line_user_id,
+                        },
+                    )
+                    results = self.run_spider(
+                        url=message_data.url,
+                        line_user_id=message_data.line_user_id,
+                        check_only=message_data.check_only,
+                    )
+                    self._handle_spider_results(results, message_data.url)
 
-                self._handle_spider_results(results, message_data.url)
                 logger.info("Listening for messages...")
 
         except Exception as e:
