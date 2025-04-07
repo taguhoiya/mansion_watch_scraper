@@ -161,6 +161,13 @@ class TestMongoPipeline:
         mock = MagicMock()
         return mock
 
+    @pytest.fixture
+    def mock_get_current_time(self):
+        """Mock get_current_time to return UTC time."""
+        with patch("mansion_watch_scraper.pipelines.get_current_time") as mock:
+            mock.side_effect = lambda: datetime.datetime.now(datetime.timezone.utc)
+            yield mock
+
     def test_process_item_success(self, pipeline, mock_db):
         """Test successful item processing."""
         pipeline.db = mock_db
@@ -205,7 +212,9 @@ class TestMongoPipeline:
         with pytest.raises(DropItem):
             pipeline.process_item(item, None)
 
-    def test_process_item_update_existing(self, pipeline, mock_db):
+    def test_process_item_update_existing(
+        self, pipeline, mock_db, mock_get_current_time
+    ):
         """Test updating an existing property document."""
         pipeline.db = mock_db
         existing_id = ObjectId()
@@ -241,13 +250,23 @@ class TestMongoPipeline:
         mock_db["properties"].find_one.assert_called_once()
         mock_db["properties"].update_one.assert_called_once()
 
-        # Verify that _id and created_at are not included in the update
+        # Verify that only is_active and updated_at are updated, while other fields are preserved
         update_dict = mock_db["properties"].update_one.call_args[0][1]["$set"]
         assert "_id" not in update_dict
         assert "created_at" not in update_dict
-        assert update_dict["name"] == "New Name"
+        assert "name" not in update_dict  # Name should not be updated
         assert update_dict["is_active"] is False
-        assert update_dict["updated_at"] == current_time
+
+        # Verify updated_at is a recent timestamp (within 5 seconds of current_time)
+        updated_at = update_dict["updated_at"]
+        assert isinstance(updated_at, datetime.datetime)
+        assert updated_at.tzinfo == datetime.timezone.utc
+        time_diff = abs((updated_at - current_time).total_seconds())
+        assert time_diff < 5, f"updated_at timestamp differs by {time_diff} seconds"
+
+        # Verify that other fields are preserved using $setOnInsert
+        set_on_insert = mock_db["properties"].update_one.call_args[0][1]["$setOnInsert"]
+        assert set_on_insert["name"] == "Old Name"  # Original name should be preserved
 
     def test_process_item_insert_new(self, pipeline, mock_db):
         """Test inserting a new property document."""

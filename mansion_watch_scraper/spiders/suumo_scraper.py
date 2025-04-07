@@ -6,7 +6,6 @@ from logging import LoggerAdapter
 from typing import Any, Dict, List, Optional
 
 import scrapy
-from anyio import current_time
 from bson.objectid import ObjectId
 from dotenv import load_dotenv
 from scrapy.http import Response
@@ -207,12 +206,13 @@ class MansionWatchSpider(scrapy.Spider):
                 response, original_url
             )
 
+            current_time = get_current_time()
+
             # If redirected to library, update is_active and timestamps
             if is_redirected_to_library:
                 self.log(
                     f"Property is sold out: {response.url}", operation="sold_out_check"
                 )
-                current_time = datetime.now()
                 # Set next_aggregated_at to year '9999-12-31 23:59:59' to indicate it's sold out
                 sold_out_date = datetime(9999, 12, 31, 23, 59, 59)
 
@@ -239,7 +239,7 @@ class MansionWatchSpider(scrapy.Spider):
                         "name": name,
                         "url": original_url,  # Always use original URL
                         "is_active": False,
-                        "updated_at": current_time,
+                        "updated_at": get_current_time(),
                     },
                     "property_overviews": {
                         "updated_at": current_time,
@@ -268,7 +268,6 @@ class MansionWatchSpider(scrapy.Spider):
                 operation="property_extraction",
             )
 
-            current_time = datetime.now()
             property_overview = self._extract_property_overview(
                 response, property_item.name, current_time, property_item.id
             )
@@ -370,7 +369,7 @@ class MansionWatchSpider(scrapy.Spider):
                 "url": original_url,  # Always use original URL
                 "redirected_url": response.url,  # Add the redirected URL
                 "is_active": not is_redirected_to_library,
-                "updated_at": current_time,
+                "updated_at": get_current_time(),
             }
         }
 
@@ -946,6 +945,7 @@ class MansionWatchSpider(scrapy.Spider):
                 # For library pages, try different format
                 property_name = title.split("|")[0].strip() if "|" in title else title
 
+            current_time = get_current_time()
             # Handle library page (sold-out property)
             if is_redirected_to_library:
                 self.log(f"Creating sold-out property object for: {original_url}")
@@ -955,8 +955,8 @@ class MansionWatchSpider(scrapy.Spider):
                     large_property_description="この物件は現在販売されていません。",
                     small_property_description="この物件は売却済みです。最新の情報はSUUMOのライブラリページでご確認ください。",
                     is_active=False,  # Ensure this is False for library pages
-                    created_at=datetime.now(),
-                    updated_at=datetime.now(),
+                    created_at=current_time,
+                    updated_at=current_time,
                     image_urls=[],
                     price=None,
                     address=None,
@@ -1015,8 +1015,8 @@ class MansionWatchSpider(scrapy.Spider):
                 large_property_description=large_desc,
                 small_property_description=small_desc,
                 is_active=not is_redirected_to_library,  # Set based on redirect status
-                created_at=datetime.now(),
-                updated_at=datetime.now(),
+                created_at=current_time,
+                updated_at=current_time,
                 image_urls=image_urls,
             )
 
