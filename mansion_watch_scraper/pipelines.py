@@ -194,6 +194,7 @@ def process_property(
 
     # Check if the URL is redirected to a library page using the redirected_url
     is_redirected_to_library = "/library/" in property_dict.get("redirected_url", "")
+    current_time = get_current_time()
 
     if existing is not None:
         # Only update is_active and updated_at
@@ -204,12 +205,12 @@ def process_property(
                     if is_redirected_to_library
                     else property_dict.get("is_active", True)
                 ),
-                "updated_at": get_current_time(),
+                "updated_at": current_time,
             },
             # Preserve existing values for these fields if they exist
             "$setOnInsert": {
                 "image_urls": existing.get("image_urls", []),
-                "created_at": existing.get("created_at", get_current_time()),
+                "created_at": existing.get("created_at", current_time),
                 "large_property_description": existing.get(
                     "large_property_description", ""
                 ),
@@ -224,8 +225,8 @@ def process_property(
         return existing["_id"]
 
     # For new properties, create a record with all fields
-    property_dict["created_at"] = get_current_time()
-    property_dict["updated_at"] = get_current_time()
+    property_dict["created_at"] = current_time
+    property_dict["updated_at"] = current_time
     property_dict["is_active"] = (
         False if is_redirected_to_library else property_dict.get("is_active", True)
     )
@@ -326,12 +327,13 @@ def process_property_overview(
 
     query = {"property_id": property_id}
     existing = db[PROPERTY_OVERVIEWS].find_one(query)
+    current_time = get_current_time()
 
     if existing:
         # Only update price and updated_at, preserve other fields
         update_operation = {
             "$set": {
-                "updated_at": get_current_time(),
+                "updated_at": current_time,
             },
             # Preserve existing values
             "$setOnInsert": {
@@ -346,8 +348,8 @@ def process_property_overview(
         return existing["_id"]
 
     # For new properties, create initial overview record
-    overview_dict["created_at"] = get_current_time()
-    overview_dict["updated_at"] = get_current_time()
+    overview_dict["created_at"] = current_time
+    overview_dict["updated_at"] = current_time
     result = db[PROPERTY_OVERVIEWS].insert_one(overview_dict)
     return result.inserted_id
 
@@ -367,12 +369,13 @@ def process_common_overview(
 
     query = {"property_id": property_id}
     existing = db[COMMON_OVERVIEWS].find_one(query)
+    current_time = get_current_time()
 
     if existing:
         # Only update updated_at, preserve all other fields
         update_operation = {
             "$set": {
-                "updated_at": get_current_time(),
+                "updated_at": current_time,
             },
             # Preserve existing values
             "$setOnInsert": {
@@ -383,8 +386,8 @@ def process_common_overview(
         return existing["_id"]
 
     # For new properties, create initial overview record
-    overview_dict["created_at"] = get_current_time()
-    overview_dict["updated_at"] = get_current_time()
+    overview_dict["created_at"] = current_time
+    overview_dict["updated_at"] = current_time
     result = db[COMMON_OVERVIEWS].insert_one(overview_dict)
     return result.inserted_id
 
