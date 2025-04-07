@@ -96,48 +96,74 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
             # If header is invalid, continue processing
             return True
 
+    def _decode_pubsub_data(self, pubsub_message: dict, subscription: str) -> dict:
+        """Decode the data field from a Pub/Sub message."""
+        if subscription == "direct":
+            return pubsub_message
+
+        try:
+            encoded_data = pubsub_message["data"]
+            decoded_data = base64.b64decode(encoded_data).decode("utf-8")
+            return json.loads(decoded_data)
+        except Exception as e:
+            logger.error(
+                "Failed to decode message data",
+                extra={
+                    "error": str(e),
+                    "error_type": e.__class__.__name__,
+                    "encoded_data": pubsub_message.get("data"),
+                },
+            )
+            raise ValueError(f"Invalid message data format: {str(e)}")
+
+    def _validate_message_data(self, message_data: dict, subscription: str) -> None:
+        """Validate required fields in message data."""
+        if not isinstance(message_data, dict):
+            logger.error(
+                "Invalid message data format",
+                extra={"subscription": subscription, "message_data": message_data},
+            )
+            raise ValueError("Invalid message data format")
+
+        required_fields = ["timestamp", "url", "line_user_id"]
+        missing_fields = [
+            field for field in required_fields if field not in message_data
+        ]
+        if missing_fields:
+            logger.error(
+                "Missing required fields in message data",
+                extra={
+                    "subscription": subscription,
+                    "missing_fields": missing_fields,
+                    "message_data": message_data,
+                },
+            )
+            raise ValueError(f"Missing required fields: {', '.join(missing_fields)}")
+
     def parse_pubsub_message(self, body: bytes) -> tuple[dict, str, dict]:
-        """Parse and validate the Pub/Sub message from request body.
-
-        Args:
-            body: Raw request body bytes
-
-        Returns:
-            tuple: (pubsub_message, subscription, message_data)
-
-        Raises:
-            ValueError: If message format is invalid
-        """
+        """Parse and validate the Pub/Sub message from request body."""
         try:
             body_json = json.loads(body.decode("utf-8"))
         except json.JSONDecodeError as e:
-            logger.error("Failed to decode JSON", extra={"error": str(e)})
+            logger.error(
+                "Failed to decode JSON",
+                extra={"error": str(e), "body": body.decode("utf-8", errors="ignore")},
+            )
             raise ValueError("Invalid JSON payload")
 
-        # Validate Pub/Sub message format
-        if "message" not in body_json or "subscription" not in body_json:
-            logger.error("Invalid Pub/Sub message format", extra={"body": body_json})
-            raise ValueError("Invalid Pub/Sub message format")
+        # Handle both direct messages and Pub/Sub push messages
+        if isinstance(body_json, dict) and "message" in body_json:
+            pubsub_message = body_json["message"]
+            subscription = body_json.get("subscription", "unknown")
+        else:
+            pubsub_message = body_json
+            subscription = "direct"
 
-        pubsub_message = body_json["message"]
-        subscription = body_json["subscription"]
+        if not isinstance(pubsub_message, dict):
+            raise ValueError("Invalid message format")
 
-        # Validate required message fields
-        if "messageId" not in pubsub_message or "data" not in pubsub_message:
-            logger.error(
-                "Missing required message fields",
-                extra={"subscription": subscription},
-            )
-            raise ValueError("Missing required message fields")
-
-        # Decode message data
-        try:
-            encoded_data = pubsub_message.get("data", "{}")
-            decoded_data = base64.b64decode(encoded_data).decode("utf-8")
-            message_data = json.loads(decoded_data)
-        except Exception as e:
-            logger.error(f"Failed to decode message data: {e}")
-            raise ValueError("Invalid message data format")
+        message_data = self._decode_pubsub_data(pubsub_message, subscription)
+        self._validate_message_data(message_data, subscription)
 
         return pubsub_message, subscription, message_data
 
@@ -200,8 +226,9 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
                 # Log message processing
                 self.log_message_processing(message_data, pubsub_message, subscription)
 
-                # Process the message
-                pubsub_service.message_callback(pubsub_message)
+                # Process the message - pass the entire body_json
+                body_json = json.loads(body.decode("utf-8"))
+                pubsub_service.message_callback(body_json)
 
                 # Send success response
                 self.send_response(200)
@@ -249,22 +276,28 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
     def _send_error(self, code: int, message: str, retry: bool = True):
         """Helper method to send error responses with retry control.
 
+        According to Cloud Pub/Sub documentation, to prevent message retries and acknowledge
+        the message as processed (even if failed), we should:
+        1. Return a 200 status code
+        2. Set X-CloudPubSub-DeliveryAttempt header
+
         Args:
-            code: HTTP status code
+            code: HTTP status code (will be ignored for Pub/Sub messages)
             message: Error message
-            retry: Whether Pub/Sub should retry the message
+            retry: Whether Pub/Sub should retry the message (ignored, always set to false)
         """
-        self.send_response(code)
+        # For Pub/Sub messages, always return 200 to acknowledge the message
+        self.send_response(200)
         self.send_header("Content-Type", "application/json")
 
-        # Control retry behavior
-        if not retry:
-            # Tell Pub/Sub not to retry
-            self.send_header("X-CloudPubSub-DeliveryAttempt", "1")
+        # Tell Pub/Sub not to retry by setting the delivery attempt header
+        self.send_header("X-CloudPubSub-DeliveryAttempt", "1")
 
         self.end_headers()
         self.wfile.write(
-            json.dumps({"status": "error", "error": message}).encode("utf-8")
+            json.dumps(
+                {"status": "error", "error": message, "original_status_code": code}
+            ).encode("utf-8")
         )
 
 
