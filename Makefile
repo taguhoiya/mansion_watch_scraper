@@ -54,4 +54,4 @@ seed-docker: ## Seed the database with sample data in the docker container.
 .PHONY: scrape-docker
 scrape-docker: ## Run the scraper in the docker container.
 	docker build -t mansion-watch-scraper -f mansion_watch_scraper/pubsub/Dockerfile .
-	docker run -p 8081:8080 --env-file .env.prod mansion-watch-scraper
+	docker run -p 8081:8080 mansion-watch-scraper

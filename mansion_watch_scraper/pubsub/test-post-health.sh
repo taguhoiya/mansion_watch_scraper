@@ -3,107 +3,112 @@
 # Set the base URL
 BASE_URL="http://localhost:8081"
 
-# Test 0: Basic health check (GET)
-echo "Testing basic health check..."
+# Create a mock JWT token for local testing
+# In production, this would be a real service account token
+MOCK_TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkNsb3VkIFJ1biBJbnZva2VyIiwiaWF0IjoxNTE2MjM5MDIyfQ.L8i6g3PfcHlioHCCPURC9pmXT7gdJpx3kOVB2q4SOy4"
+
+# Function to create a base64 encoded message
+create_message() {
+  local data=$1
+  echo -n "$data" | base64
+}
+
+# Function to send request
+send_request() {
+  local data=$1
+  curl -X POST "${BASE_URL}/" \
+    -H "Authorization: Bearer ${MOCK_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -H "X-CloudPubSub-DeliveryAttempt: 1" \
+    -d "$data"
+  echo -e "\n"
+}
+
+echo "Starting message format tests..."
+echo "----------------------------------------"
+
+# Test 1: Basic health check
+echo "Test 1: Basic health check (GET)..."
 curl -X GET "${BASE_URL}/"
+echo -e "\n----------------------------------------\n"
 
-echo -e "\n\n"
-
-# Test 1: Run batch processing for all users (checks active properties with check_only) which happens when running a batch job
-echo "Testing batch processing for all users..."
-echo "This will:"
-echo "- Filter for properties with is_active=true"
-echo "- Send messages with check_only=true"
-curl -X POST "${BASE_URL}/" \
-  -H "Content-Type: application/json" \
-  -d '{
-  "message": {
-    "data": "'$(echo -n '{"timestamp":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","check_only":true}' | base64)'",
-    "messageId": "batch-all-users"
-  }
+# Test 2: Batch processing (all users)
+echo "Test 2: Batch processing for all users..."
+data='{"timestamp":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","check_only":true}'
+message='{
+    "message": {
+        "data": "'$(create_message "$data")'",
+        "messageId": "batch-all-users",
+        "publishTime": "'$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")'",
+        "attributes": {}
+    },
+    "subscription": "projects/test-project/subscriptions/test-subscription"
 }'
+send_request "$message"
+echo "----------------------------------------"
 
-echo -e "\n\n"
-
-# # Test 2: Run batch processing for specific user (checks active properties with check_only) which happens when the user clicks the "Update All" button on the UI
-echo "Testing batch processing for specific user..."
-echo "This will:"
-echo "- Filter for properties with is_active=true"
-echo "- Filter for specific line_user_id"
-echo "- Send messages with check_only=true"
-curl -X POST "${BASE_URL}/" \
-  -H "Content-Type: application/json" \
-  -d '{
-  "message": {
-    "data": "'$(echo -n '{"timestamp":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","line_user_id":"U8e5f5a15df59714a88334bfb9f8ff106","check_only":true}' | base64)'",
-    "messageId": "batch-specific-user"
-  }
+# Test 3: Batch processing (specific user)
+echo "Test 3: Batch processing for specific user..."
+data='{"timestamp":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","line_user_id":"U8e5f5a15df59714a88334bfb9f8ff106","check_only":true}'
+message='{
+    "message": {
+        "data": "'$(create_message "$data")'",
+        "messageId": "batch-specific-user",
+        "publishTime": "'$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")'",
+        "attributes": {}
+    },
+    "subscription": "projects/test-project/subscriptions/test-subscription"
 }'
+send_request "$message"
+echo "----------------------------------------"
 
-echo -e "\n\n"
+# Test 4: Invalid message format
+echo "Test 4: Invalid message format..."
+send_request '{"invalid": "format"}'
+echo "----------------------------------------"
 
-# Test 3: Test with invalid user ID
-echo "Testing with invalid user ID..."
-echo "This will process the message but the service will handle the invalid user"
-curl -X POST "${BASE_URL}/" \
-  -H "Content-Type: application/json" \
-  -d '{
-  "message": {
-    "data": "'$(echo -n '{"timestamp":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","line_user_id":"invalid_user_id","check_only":true}' | base64)'",
-    "messageId": "invalid-user"
-  }
+# Test 5: Invalid base64 data
+echo "Test 5: Invalid base64 data..."
+message='{
+    "message": {
+        "data": "invalid-base64",
+        "messageId": "invalid-data",
+        "publishTime": "'$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")'",
+        "attributes": {}
+    },
+    "subscription": "projects/test-project/subscriptions/test-subscription"
 }'
+send_request "$message"
+echo "----------------------------------------"
 
-echo -e "\n\n"
-
-# Test 4: Test invalid JSON payload
-echo "Testing invalid JSON payload..."
-echo "Expected: 400 Bad Request - Invalid JSON payload"
-curl -X POST "${BASE_URL}/" \
-  -H "Content-Type: application/json" \
-  -d '{invalid json'
-
-echo -e "\n\n"
-
-# Test 5: Test missing request body
-echo "Testing missing request body..."
-echo "Expected: 400 Bad Request - Missing message field"
-curl -X POST "${BASE_URL}/" \
-  -H "Content-Type: application/json" \
-  -d '{}'
-
-echo -e "\n\n"
-
-# Test 6: Test missing message field
-echo "Testing missing message field..."
-echo "Expected: 400 Bad Request - Missing message field"
-curl -X POST "${BASE_URL}/" \
-  -H "Content-Type: application/json" \
-  -d '{"not_message": {}}'
-
-echo -e "\n\n"
-
-# Test 7: Test invalid base64 data
-echo "Testing invalid base64 data..."
-echo "Expected: 500 Error - Invalid base64 data"
-curl -X POST "${BASE_URL}/" \
-  -H "Content-Type: application/json" \
-  -d '{
-  "message": {
-    "data": "invalid-base64",
-    "messageId": "invalid-data"
-  }
+# Test 6: Specific property update
+echo "Test 6: Specific property update..."
+data='{"timestamp":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","url":"https://suumo.jp/ms/chuko/tokyo/sc_104/nc_95274249/","line_user_id":"U8e5f5a15df59714a88334bfb9f8ff106","check_only":true}'
+message='{
+    "message": {
+        "data": "'$(create_message "$data")'",
+        "messageId": "specific-property",
+        "publishTime": "'$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")'",
+        "attributes": {}
+    },
+    "subscription": "projects/test-project/subscriptions/test-subscription"
 }'
+send_request "$message"
+echo "----------------------------------------"
 
-echo -e "\n\n"
-
-# Test 8: Test specific property update
-echo "Testing specific property update..."
-curl -X POST "${BASE_URL}/" \
-  -H "Content-Type: application/json" \
-  -d '{
-  "message": {
-    "data": "'$(echo -n '{"timestamp":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","url":"https://suumo.jp/ms/chuko/tokyo/sc_104/nc_95274249/","line_user_id":"U8e5f5a15df59714a88334bfb9f8ff106","check_only":true}' | base64)'",
-    "messageId": "specific-property"
-  }
+# Test 7: Library property update
+echo "Test 7: Library property update..."
+data='{"timestamp":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","url":"https://suumo.jp/ms/chuko/tokyo/sc_minato/nc_76395792/","line_user_id":"U8e5f5a15df59714a88334bfb9f8ff106","check_only":true}'
+message='{
+    "message": {
+        "data": "'$(create_message "$data")'",
+        "messageId": "library-property",
+        "publishTime": "'$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")'",
+        "attributes": {}
+    },
+    "subscription": "projects/test-project/subscriptions/test-subscription"
 }'
+send_request "$message"
+echo "----------------------------------------"
+
+echo "All tests completed!"
