@@ -6,6 +6,7 @@ from logging import LoggerAdapter
 from typing import Any, Dict, List, Optional
 
 import scrapy
+from anyio import current_time
 from bson.objectid import ObjectId
 from dotenv import load_dotenv
 from scrapy.http import Response
@@ -112,9 +113,13 @@ class MansionWatchSpider(scrapy.Spider):
         self.message_id = message_id
         self.results = {}
 
-        # Disable pipelines in check_only mode
+        # Keep MongoPipeline active but disable image pipeline in check-only mode
         if check_only:
-            self.custom_settings = {"ITEM_PIPELINES": {}}
+            self.custom_settings = {
+                "ITEM_PIPELINES": {
+                    "mansion_watch_scraper.pipelines.MongoPipeline": 300,
+                }
+            }
 
     def start_requests(self):
         """Start the scraping requests with error handling."""
@@ -221,12 +226,18 @@ class MansionWatchSpider(scrapy.Spider):
                     return
 
                 name_xpath = '//*[@id="contents"]/div[1]/h1/text()'
-                name = name_xpath.get()
+                name = response.xpath(name_xpath).get()
+                if not name:
+                    # Try alternative xpath for library pages
+                    name = self._extract_property_name_from_library(response)
+
+                if not name:
+                    name = "物件名不明"
 
                 yield {
                     "properties": {
                         "name": name,
-                        "url": original_url,
+                        "url": original_url,  # Always use original URL
                         "is_active": False,
                         "updated_at": current_time,
                     },
@@ -289,7 +300,7 @@ class MansionWatchSpider(scrapy.Spider):
                 "status": "error",
                 "error_type": e.__class__.__name__,
                 "error_message": str(e),
-                "url": response.url,
+                "url": original_url,
             }
             return
 
@@ -338,16 +349,29 @@ class MansionWatchSpider(scrapy.Spider):
             response, original_url
         )
 
+        # Set results for status reporting
         self.results = {
             "status": "success",
             "property_info": {
                 "properties": {
                     "name": property_name,
-                    "url": response.url,
+                    "url": original_url,  # Always use original URL
+                    "redirected_url": response.url,  # Add the redirected URL
                     "is_active": not is_redirected_to_library,
                     "updated_at": get_current_time(),
                 },
             },
+        }
+
+        # Yield the property information for pipeline processing
+        yield {
+            "properties": {
+                "name": property_name,
+                "url": original_url,  # Always use original URL
+                "redirected_url": response.url,  # Add the redirected URL
+                "is_active": not is_redirected_to_library,
+                "updated_at": current_time,
+            }
         }
 
     def _log_http_error(
@@ -910,16 +934,24 @@ class MansionWatchSpider(scrapy.Spider):
                 return None
 
             # Extract property name from title (format: "【SUUMO】PropertyName 中古マンション物件情報")
-            property_name = (
-                title.split("【")[1].split("】")[1].split(" 中古マンション")[0].strip()
-            )
+            property_name = None
+            if "【" in title and "】" in title:
+                property_name = (
+                    title.split("【")[1]
+                    .split("】")[1]
+                    .split(" 中古マンション")[0]
+                    .strip()
+                )
+            else:
+                # For library pages, try different format
+                property_name = title.split("|")[0].strip() if "|" in title else title
 
             # Handle library page (sold-out property)
             if is_redirected_to_library:
-                self.log(f"Creating sold-out property object for: {response.url}")
+                self.log(f"Creating sold-out property object for: {original_url}")
                 return Property(
                     name=f"{property_name or '物件名不明'} (売却済み)",
-                    url=response.url,
+                    url=original_url,  # Use original URL instead of library URL
                     large_property_description="この物件は現在販売されていません。",
                     small_property_description="この物件は売却済みです。最新の情報はSUUMOのライブラリページでご確認ください。",
                     is_active=False,  # Ensure this is False for library pages
@@ -1000,6 +1032,6 @@ class MansionWatchSpider(scrapy.Spider):
                 "status": "error",
                 "error_type": e.__class__.__name__,
                 "error_message": str(e),
-                "url": response.url,
+                "url": original_url,
             }
             return None

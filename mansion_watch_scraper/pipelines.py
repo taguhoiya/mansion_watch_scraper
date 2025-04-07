@@ -15,6 +15,7 @@ import tempfile
 import time
 import urllib.parse
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any, Dict, List, Optional, Tuple, TypeVar, Union
 
 import pymongo
@@ -168,9 +169,21 @@ def process_property(
 ) -> Optional[ObjectId]:
     """Process property data and store in MongoDB."""
     if PROPERTIES not in item:
+        logger.warning("No properties found in item")
         return None
 
     property_dict = convert_to_dict(item[PROPERTIES], "properties")
+
+    # Log the incoming property data
+    logger.info(
+        "Processing property",
+        extra={
+            "property_name": property_dict.get("name"),
+            "url": property_dict.get("url"),
+            "redirected_url": property_dict.get("redirected_url"),
+            "is_active": property_dict.get("is_active"),
+        },
+    )
 
     # Remove any id fields (should already be removed by convert_to_dict)
     property_dict.pop("id", None)
@@ -179,13 +192,43 @@ def process_property(
     query = {"url": property_dict["url"]}
     existing = db[PROPERTIES].find_one(query)
 
+    # Check if the URL is redirected to a library page using the redirected_url
+    is_redirected_to_library = "/library/" in property_dict.get("redirected_url", "")
+
     if existing is not None:
-        property_dict = {
-            k: v for k, v in property_dict.items() if k not in ["created_at"]
+        # Only update is_active and updated_at
+        update_operation = {
+            "$set": {
+                "is_active": (
+                    False
+                    if is_redirected_to_library
+                    else property_dict.get("is_active", True)
+                ),
+                "updated_at": get_current_time(),
+            },
+            # Preserve existing values for these fields if they exist
+            "$setOnInsert": {
+                "image_urls": existing.get("image_urls", []),
+                "created_at": existing.get("created_at", get_current_time()),
+                "large_property_description": existing.get(
+                    "large_property_description", ""
+                ),
+                "small_property_description": existing.get(
+                    "small_property_description", ""
+                ),
+                "name": existing.get("name", ""),
+            },
         }
-        db[PROPERTIES].update_one(query, {"$set": property_dict})
+
+        db[PROPERTIES].update_one(query, update_operation)
         return existing["_id"]
 
+    # For new properties, create a record with all fields
+    property_dict["created_at"] = get_current_time()
+    property_dict["updated_at"] = get_current_time()
+    property_dict["is_active"] = (
+        False if is_redirected_to_library else property_dict.get("is_active", True)
+    )
     result = db[PROPERTIES].insert_one(property_dict)
     return result.inserted_id
 
@@ -219,27 +262,43 @@ def process_user_property(
     current_time = get_current_time()
 
     if existing:
-        # For existing records, only update specific fields
-        update_data = {**user_property_dict}
-        # Don't update these fields for existing records
-        for field in ["_id", "first_succeeded_at", "property_id", "line_user_id"]:
-            update_data.pop(field, None)
-
-        # Add last_succeeded_at timestamp
-        update_data["last_succeeded_at"] = current_time
-
-        db[USER_PROPERTIES].update_one(query, {"$set": update_data})
-        return existing["_id"]
-    else:
-        # For new records, include first_succeeded_at and created_at
-        user_property_dict.update(
-            {
-                "first_succeeded_at": current_time,
+        # Only update tracking fields, preserve all other fields
+        update_operation = {
+            "$set": {
                 "last_succeeded_at": current_time,
-            }
-        )
-        result = db[USER_PROPERTIES].insert_one(user_property_dict)
-        return result.inserted_id
+                "last_aggregated_at": current_time,
+                "next_aggregated_at": current_time + timedelta(days=3),
+            },
+            # Preserve existing values
+            "$setOnInsert": {
+                k: existing.get(k)
+                for k in existing
+                if k
+                not in [
+                    "_id",
+                    "last_succeeded_at",
+                    "last_aggregated_at",
+                    "next_aggregated_at",
+                ]
+            },
+        }
+
+        db[USER_PROPERTIES].update_one(query, update_operation)
+        return existing["_id"]
+
+    # For new records, include all fields
+    user_property_dict.update(
+        {
+            "first_succeeded_at": current_time,
+            "last_succeeded_at": current_time,
+            "last_aggregated_at": current_time,
+            "next_aggregated_at": current_time + timedelta(days=3),
+            "created_at": current_time,
+            "updated_at": current_time,
+        }
+    )
+    result = db[USER_PROPERTIES].insert_one(user_property_dict)
+    return result.inserted_id
 
 
 def process_property_overview(
@@ -269,11 +328,26 @@ def process_property_overview(
     existing = db[PROPERTY_OVERVIEWS].find_one(query)
 
     if existing:
-        for field in ["_id", "created_at"]:
-            overview_dict.pop(field, None)
-        db[PROPERTY_OVERVIEWS].update_one(query, {"$set": overview_dict})
+        # Only update price and updated_at, preserve other fields
+        update_operation = {
+            "$set": {
+                "updated_at": get_current_time(),
+            },
+            # Preserve existing values
+            "$setOnInsert": {
+                k: existing.get(k) for k in existing if k not in ["_id", "updated_at"]
+            },
+        }
+        # Only update price if it exists in new data
+        if "price" in overview_dict:
+            update_operation["$set"]["price"] = overview_dict["price"]
+
+        db[PROPERTY_OVERVIEWS].update_one(query, update_operation)
         return existing["_id"]
 
+    # For new properties, create initial overview record
+    overview_dict["created_at"] = get_current_time()
+    overview_dict["updated_at"] = get_current_time()
     result = db[PROPERTY_OVERVIEWS].insert_one(overview_dict)
     return result.inserted_id
 
@@ -295,11 +369,22 @@ def process_common_overview(
     existing = db[COMMON_OVERVIEWS].find_one(query)
 
     if existing:
-        for field in ["_id", "created_at"]:
-            overview_dict.pop(field, None)
-        db[COMMON_OVERVIEWS].update_one(query, {"$set": overview_dict})
+        # Only update updated_at, preserve all other fields
+        update_operation = {
+            "$set": {
+                "updated_at": get_current_time(),
+            },
+            # Preserve existing values
+            "$setOnInsert": {
+                k: existing.get(k) for k in existing if k not in ["_id", "updated_at"]
+            },
+        }
+        db[COMMON_OVERVIEWS].update_one(query, update_operation)
         return existing["_id"]
 
+    # For new properties, create initial overview record
+    overview_dict["created_at"] = get_current_time()
+    overview_dict["updated_at"] = get_current_time()
     result = db[COMMON_OVERVIEWS].insert_one(overview_dict)
     return result.inserted_id
 

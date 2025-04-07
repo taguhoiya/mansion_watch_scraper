@@ -50,93 +50,157 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps({"status": "ok"}).encode("utf-8"))
 
+    def verify_cloud_run_authentication(self) -> bool:
+        """Verify the request is from Cloud Run Pub/Sub push.
+
+        Returns:
+            bool: True if authenticated, False otherwise
+        """
+        auth_header = self.headers.get("Authorization", "")
+
+        if not auth_header.startswith("Bearer "):
+            logger.error("Missing or invalid Authorization header")
+            return False
+
+        # In Cloud Run, authentication is handled automatically
+        # If we receive the request, it means Cloud Run has already authenticated it
+        return True
+
+    def check_retry_count(self) -> bool:
+        """Check if message has exceeded retry attempts.
+
+        Cloud Run's Pub/Sub retry count is in the X-CloudPubSub-DeliveryAttempt header.
+        After 5 retries (value of 6), we'll stop retrying to prevent excessive processing.
+
+        Returns:
+            bool: True if should continue processing, False if should stop
+        """
+        try:
+            retry_count = int(self.headers.get("X-CloudPubSub-DeliveryAttempt", "1"))
+            if retry_count > 5:  # Stop after 5 retries (less than Cloud Run's max of 7)
+                logger.warning(
+                    "Message exceeded retry limit",
+                    extra={
+                        "operation": "retry_check",
+                        "retry_count": retry_count,
+                    },
+                )
+                self._send_error(
+                    429,  # Too Many Requests
+                    "Message exceeded retry limit",
+                    retry=False,
+                )
+                return False
+            return True
+        except ValueError:
+            # If header is invalid, continue processing
+            return True
+
+    def parse_pubsub_message(self, body: bytes) -> tuple[dict, str, dict]:
+        """Parse and validate the Pub/Sub message from request body.
+
+        Args:
+            body: Raw request body bytes
+
+        Returns:
+            tuple: (pubsub_message, subscription, message_data)
+
+        Raises:
+            ValueError: If message format is invalid
+        """
+        try:
+            body_json = json.loads(body.decode("utf-8"))
+        except json.JSONDecodeError as e:
+            logger.error("Failed to decode JSON", extra={"error": str(e)})
+            raise ValueError("Invalid JSON payload")
+
+        # Validate Pub/Sub message format
+        if "message" not in body_json or "subscription" not in body_json:
+            logger.error("Invalid Pub/Sub message format", extra={"body": body_json})
+            raise ValueError("Invalid Pub/Sub message format")
+
+        pubsub_message = body_json["message"]
+        subscription = body_json["subscription"]
+
+        # Validate required message fields
+        if "messageId" not in pubsub_message or "data" not in pubsub_message:
+            logger.error(
+                "Missing required message fields",
+                extra={"subscription": subscription},
+            )
+            raise ValueError("Missing required message fields")
+
+        # Decode message data
+        try:
+            encoded_data = pubsub_message.get("data", "{}")
+            decoded_data = base64.b64decode(encoded_data).decode("utf-8")
+            message_data = json.loads(decoded_data)
+        except Exception as e:
+            logger.error(f"Failed to decode message data: {e}")
+            raise ValueError("Invalid message data format")
+
+        return pubsub_message, subscription, message_data
+
+    def log_message_processing(
+        self, message_data: dict, pubsub_message: dict, subscription: str
+    ) -> None:
+        """Log appropriate message based on the message type."""
+        user_id = message_data.get("line_user_id")
+        url = message_data.get("url")
+
+        # Update logger context
+        logger.extra.update({"user_id": user_id, "url": url})
+
+        log_extra = {
+            "operation": "pubsub_push",
+            "message_id": pubsub_message.get("messageId"),
+            "subscription": subscription,
+        }
+
+        if url and user_id:
+            log_extra.update({"user_id": user_id, "url": url})
+            logger.info(
+                "Processing Pub/Sub message for specific property", extra=log_extra
+            )
+        elif user_id:
+            log_extra.update({"user_id": user_id})
+            logger.info("Processing Pub/Sub message for user batch", extra=log_extra)
+        else:
+            logger.info(
+                "Processing Pub/Sub message for all users batch", extra=log_extra
+            )
+
     def do_POST(self):
         """Handle POST requests for Pub/Sub push messages."""
         try:
-            # Get content length
-            content_length = int(self.headers.get("Content-Length", 0))
+            # Verify Cloud Run authentication
+            if not self.verify_cloud_run_authentication():
+                self._send_error(403, "Unauthorized")
+                return
 
-            # Read and parse request body
+            # Check retry count
+            if not self.check_retry_count():
+                return
+
+            # Get content length and validate
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length == 0:
+                self._send_error(400, "Empty request body", retry=False)
+                return
+
+            # Read request body
             body = self.rfile.read(content_length)
 
             try:
-                body_json = json.loads(body.decode("utf-8"))
-            except json.JSONDecodeError as e:
-                logger.error(
-                    "Failed to decode JSON",
-                    extra={
-                        "operation": "pubsub_push",
-                        "error": str(e),
-                        "user_id": None,
-                        "url": None,
-                    },
-                )
-                self._send_error(400, "Invalid JSON payload")
-                return
-
-            # Extract the actual Pub/Sub message from the body
-            try:
-                if "message" not in body_json:
-                    logger.error(
-                        "No message field in request",
-                        extra={
-                            "operation": "pubsub_push",
-                            "body": body_json,
-                            "user_id": None,
-                            "url": None,
-                        },
-                    )
-                    self._send_error(400, "No message field in request")
-                    return
-
-                pubsub_message = body_json["message"]
-
-                # Decode base64 data before parsing JSON
-                encoded_data = pubsub_message.get("data", "{}")
-                decoded_data = base64.b64decode(encoded_data).decode("utf-8")
-                message_data = json.loads(decoded_data)
-
-                user_id = message_data.get("line_user_id")
-                url = message_data.get("url")
-
-                # Update logger context
-                logger.extra.update(
-                    {
-                        "user_id": user_id,
-                        "url": url,
-                    }
+                # Parse and validate message
+                pubsub_message, subscription, message_data = self.parse_pubsub_message(
+                    body
                 )
 
-                # Log based on message type
-                if url and user_id:
-                    logger.info(
-                        "Processing Pub/Sub message for specific property",
-                        extra={
-                            "operation": "pubsub_push",
-                            "message_id": pubsub_message.get("messageId", "unknown"),
-                            "user_id": user_id,
-                            "url": url,
-                        },
-                    )
-                elif user_id:
-                    logger.info(
-                        "Processing Pub/Sub message for user batch",
-                        extra={
-                            "operation": "pubsub_push",
-                            "message_id": pubsub_message.get("messageId", "unknown"),
-                            "user_id": user_id,
-                        },
-                    )
-                else:
-                    logger.info(
-                        "Processing Pub/Sub message for all users batch",
-                        extra={
-                            "operation": "pubsub_push",
-                            "message_id": pubsub_message.get("messageId", "unknown"),
-                        },
-                    )
+                # Log message processing
+                self.log_message_processing(message_data, pubsub_message, subscription)
 
-                # Use the global PubSubService instance
+                # Process the message
                 pubsub_service.message_callback(pubsub_message)
 
                 # Send success response
@@ -145,39 +209,59 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({"status": "ok"}).encode("utf-8"))
 
+            except ValueError as e:
+                # Handle validation errors - don't retry
+                self._send_error(400, str(e), retry=False)
             except Exception as e:
+                # Handle processing errors - allow retry
                 logger.error(
                     "Error processing Pub/Sub message",
                     extra={
                         "operation": "pubsub_push",
                         "error": str(e),
                         "error_type": e.__class__.__name__,
-                        "user_id": None,
-                        "url": None,
+                        "message_id": (
+                            pubsub_message.get("messageId")
+                            if "pubsub_message" in locals()
+                            else None
+                        ),
+                        "subscription": (
+                            subscription if "subscription" in locals() else None
+                        ),
                     },
                     exc_info=True,
                 )
-                self._send_error(500, f"Error processing message: {str(e)}")
-                return
+                self._send_error(500, f"Error processing message: {str(e)}", retry=True)
 
         except Exception as e:
+            # Handle unexpected errors - allow retry
             logger.error(
                 "Error handling POST request",
                 extra={
                     "operation": "pubsub_push",
                     "error": str(e),
                     "error_type": e.__class__.__name__,
-                    "user_id": None,
-                    "url": None,
                 },
                 exc_info=True,
             )
-            self._send_error(500, f"Internal server error: {str(e)}")
+            self._send_error(500, f"Internal server error: {str(e)}", retry=True)
 
-    def _send_error(self, code: int, message: str):
-        """Helper method to send error responses."""
+    def _send_error(self, code: int, message: str, retry: bool = True):
+        """Helper method to send error responses with retry control.
+
+        Args:
+            code: HTTP status code
+            message: Error message
+            retry: Whether Pub/Sub should retry the message
+        """
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
+
+        # Control retry behavior
+        if not retry:
+            # Tell Pub/Sub not to retry
+            self.send_header("X-CloudPubSub-DeliveryAttempt", "1")
+
         self.end_headers()
         self.wfile.write(
             json.dumps({"status": "error", "error": message}).encode("utf-8")
