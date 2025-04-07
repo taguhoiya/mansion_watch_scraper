@@ -3,7 +3,6 @@ import json
 import logging
 import multiprocessing
 import os
-import signal
 import sys
 from datetime import datetime
 from logging import LoggerAdapter
@@ -169,19 +168,9 @@ class PubSubService:
                 raise ValueError("GCP_PROJECT_ID environment variable is not set")
 
             self.subscription_name = subscription_name or os.getenv(
-                "PUBSUB_SUBSCRIPTION", "mansion-watch-scraper-sub-pull"
+                "PUBSUB_SUBSCRIPTION", "mansion-watch-scraper-sub-push"
             )
 
-            self.flow_control = pubsub_v1.types.FlowControl(
-                max_messages=10,  # Maximum number of messages to hold in memory
-                max_bytes=50
-                * 1024
-                * 1024,  # Maximum size of messages to hold in memory (50MB)
-                max_lease_duration=600,  # Maximum number of seconds to hold messages before releasing
-            )
-
-            self.subscriber = None
-            self.is_running = False
             self._processed_messages = set()
             self._lock = Lock()  # Add lock for thread safety
             self._settings = get_project_settings()
@@ -358,26 +347,26 @@ class PubSubService:
                     exc_info=True,
                 )
 
-    def message_callback(
-        self, message: Union[pubsub_v1.subscriber.message.Message, Dict[str, Any]]
-    ) -> None:
-        """Process a Pub/Sub message."""
+    def message_callback(self, message: Dict[str, Any]) -> None:
+        """Process a Pub/Sub push message.
+
+        For push subscriptions, acknowledgment is handled by the HTTP response.
+        This method only needs to process the message content.
+
+        Args:
+            message: The Pub/Sub message from the push request
+        """
         try:
             with self._lock:  # Use lock when processing messages
-                # Clear processed messages set for testing
-                self._processed_messages.clear()
+                # Clear processed messages set periodically
+                if len(self._processed_messages) > 1000:
+                    self._processed_messages.clear()
 
-                # Decode message data
-                if "data" not in message:
-                    logger.error(
-                        "No data field in message",
-                        extra={"operation": "message_validation"},
-                    )
-                    return
+                # Extract message data
+                message_id = message.get("messageId", "unknown")
 
-                message_id, data = self._extract_message_data(message)
                 logger.info(
-                    f"Received message with ID: {message_id}",
+                    f"Processing message with ID: {message_id}",
                     extra={"operation": "message_received", "message_id": message_id},
                 )
 
@@ -392,16 +381,16 @@ class PubSubService:
                     return
 
                 self._processed_messages.add(message_id)
-                if len(self._processed_messages) > 1000:
-                    self._processed_messages.clear()
 
+                # Decode and validate message data
                 try:
-                    data_str = data.decode("utf-8") if isinstance(data, bytes) else data
+                    encoded_data = message.get("data", "{}")
+                    data_str = base64.b64decode(encoded_data).decode("utf-8")
                     data_dict = json.loads(data_str)
                     message_data = MessageData(**data_dict)
                 except Exception as e:
                     logger.error(f"Failed to parse message data: {e}")
-                    return
+                    raise  # Re-raise to trigger HTTP error response
 
                 # If no URL is provided, this is a batch processing request
                 if not message_data.url:
@@ -424,75 +413,18 @@ class PubSubService:
                     )
                     self._handle_spider_results(results, message_data.url)
 
-                logger.info("Listening for messages...")
-
         except Exception as e:
             logger.error(
                 "Error processing message",
                 extra={
                     "operation": "message_error",
-                    "message_id": message_id,
+                    "message_id": message_id if "message_id" in locals() else "unknown",
                     "error": str(e),
                     "error_type": e.__class__.__name__,
                 },
                 exc_info=True,
             )
-            logger.info("Listening for messages...")
-            raise
-
-    def start(self) -> None:
-        """Start the Pub/Sub subscriber."""
-        if self.is_running:
-            logger.warning("Service is already running")
-            return
-
-        try:
-            # Create subscriber client
-            subscriber = pubsub_v1.SubscriberClient()
-            subscription_path = subscriber.subscription_path(
-                self.project_id, self.subscription_name
-            )
-
-            # Subscribe to the topic
-            self.subscriber = subscriber.subscribe(
-                subscription_path,
-                callback=self.message_callback,
-                flow_control=self.flow_control,
-            )
-
-            self.is_running = True
-
-            # Log environment variables and startup message
-            logger.info("Environment variables:")
-            logger.info(f"GCP_PROJECT_ID: {self.project_id}")
-            logger.info(f"PUBSUB_SUBSCRIPTION: {self.subscription_name}")
-            logger.info(f"GCP_BUCKET_NAME: {os.getenv('GCP_BUCKET_NAME', 'Not set')}")
-            logger.info(f"GCP_FOLDER_NAME: {os.getenv('GCP_FOLDER_NAME', 'Not set')}")
-            logger.info(f"IMAGES_STORE: {os.getenv('IMAGES_STORE', 'Not set')}")
-            logger.info("Starting service...")
-            logger.info("Listening for messages...")
-
-            # Keep the main thread from exiting
-            self.subscriber.result()
-
-        except Exception as e:
-            logger.error(f"Error starting service: {e}")
-            self.stop()
-            sys.exit(1)
-
-    def stop(self) -> None:
-        """Stop the Pub/Sub subscriber."""
-        if not self.is_running:
-            return
-
-        try:
-            if self.subscriber:
-                self.subscriber.cancel()
-                self.subscriber = None
-            self.is_running = False
-            logger.info("Service stopped")
-        except Exception as e:
-            logger.error(f"Error stopping service: {e}")
+            raise  # Re-raise to trigger HTTP error response
 
 
 def _run_spider_process(
@@ -552,11 +484,17 @@ def _run_spider_process(
 
         # Configure pipelines based on check_only mode
         if check_only:
-            settings.set("ITEM_PIPELINES", {}, priority="cmdline")
+            settings.set(
+                "ITEM_PIPELINES",
+                {
+                    "mansion_watch_scraper.pipelines.MongoPipeline": 300,
+                },
+                priority="cmdline",
+            )
             queue.put(
                 {
                     "log": "info",
-                    "message": "Running in check-only mode (pipelines disabled)",
+                    "message": "Running in check-only mode (images pipeline disabled)",
                 }
             )
         else:
@@ -590,6 +528,9 @@ def _run_spider_process(
                     "property_info": scraped_items[0],
                     "processing_status": "stored" if not check_only else "checked",
                 }
+            # If we have results from the spider in check-only mode
+            elif spider_results and spider_results.get("status") == "success":
+                results = spider_results
             # If we have a 404 status from spider results
             elif spider_results.get("status_code") == 404:
                 results = {
@@ -647,31 +588,23 @@ def _run_spider_process(
 
 def main() -> None:
     """Main function to start the service."""
-    service = None
-
-    def handle_shutdown(signum, frame):
-        logger.info(f"Received signal {signum}")
-        if service:
-            logger.info("Shutting down gracefully...")
-            service.stop()
-        sys.exit(0)
-
     try:
-        # Set up signal handlers
-        signal.signal(signal.SIGTERM, handle_shutdown)
-        signal.signal(signal.SIGINT, handle_shutdown)
-
+        # Initialize service
         service = PubSubService()
-        service.start()
 
-    except KeyboardInterrupt:
-        logger.info("Received keyboard interrupt")
-        if service:
-            service.stop()
+        # Log environment variables
+        logger.info("Environment variables:")
+        logger.info(f"GCP_PROJECT_ID: {service.project_id}")
+        logger.info(f"PUBSUB_SUBSCRIPTION: {service.subscription_name}")
+        logger.info(f"GCP_BUCKET_NAME: {os.getenv('GCP_BUCKET_NAME', 'Not set')}")
+        logger.info(f"GCP_FOLDER_NAME: {os.getenv('GCP_FOLDER_NAME', 'Not set')}")
+        logger.info(f"IMAGES_STORE: {os.getenv('IMAGES_STORE', 'Not set')}")
+
+        # Note: For push subscriptions, the actual server is started in health.py
+        logger.info("Service initialized and ready for push messages")
+
     except Exception as e:
-        logger.error(f"Fatal error: {str(e)}")
-        if service:
-            service.stop()
+        logger.error(f"Fatal error initializing service: {str(e)}")
         sys.exit(1)
 
 
