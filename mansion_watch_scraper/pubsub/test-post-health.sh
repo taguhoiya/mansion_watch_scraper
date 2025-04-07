@@ -83,7 +83,7 @@ echo "----------------------------------------"
 
 # Test 6: Specific property update
 echo "Test 6: Specific property update..."
-data='{"timestamp":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","url":"https://suumo.jp/ms/chuko/tokyo/sc_104/nc_95274249/","line_user_id":"U8e5f5a15df59714a88334bfb9f8ff106","check_only":true}'
+data='{"timestamp":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'","url":"https://suumo.jp/ms/chuko/tokyo/sc_minato/nc_76395793/","line_user_id":"U8e5f5a15df59714a88334bfb9f8ff106","check_only":true}'
 message='{
     "message": {
         "data": "'$(create_message "$data")'",
