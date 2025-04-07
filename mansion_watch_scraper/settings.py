@@ -54,6 +54,7 @@ RETRY_HTTP_CODES = [500, 502, 503, 504, 408, 429]  # Don't retry 404s
 
 # Configure download settings
 DOWNLOAD_TIMEOUT = 120  # Increased from 30 to 120 seconds
+DOWNLOAD_FAIL_ON_DATALOSS = False  # Allow data loss during downloads
 
 # Configure image pipeline settings
 IMAGES_STORE_FORMAT = "JPEG"

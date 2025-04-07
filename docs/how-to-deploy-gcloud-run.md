@@ -32,7 +32,7 @@ docker build -t mansion-watch-scraper -f mansion_watch_scraper/pubsub/Dockerfile
 Run the container locally to verify functionality:
 
 ```bash
-docker run -p 8081:8080 --env-file .env.prod mansion-watch-scraper
+docker run -p 8081:8080 mansion-watch-scraper
 ```
 
 The service will be available at `http://localhost:8081`
