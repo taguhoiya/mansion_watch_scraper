@@ -134,7 +134,6 @@ LOG_FORMAT = """{
         "function": "%(funcName)s"
     },
     "logging.googleapis.com/labels": {
-        "spider": "%(spider)s",
         "component": "scrapy"
     },
     "serviceContext": {
