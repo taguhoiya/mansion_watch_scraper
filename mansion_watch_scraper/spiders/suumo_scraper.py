@@ -1,7 +1,6 @@
 import logging
 import re
 import urllib.parse
-from datetime import datetime, timedelta
 from logging import LoggerAdapter
 from typing import Any, Dict, List, Optional
 
@@ -111,14 +110,22 @@ class MansionWatchSpider(scrapy.Spider):
         self.check_only = check_only
         self.message_id = message_id
         self.results = {}
+        self.has_results = False
 
-        # Keep MongoPipeline active but disable image pipeline in check-only mode
-        if check_only:
-            self.custom_settings = {
-                "ITEM_PIPELINES": {
-                    "mansion_watch_scraper.pipelines.MongoPipeline": 300,
-                }
-            }
+        # Base settings for all modes
+        self.custom_settings = {
+            "CLOSESPIDER_PAGECOUNT": 2,  # Allow initial page and one redirect
+            "CLOSESPIDER_TIMEOUT": 30,  # 30 seconds timeout
+            "ITEM_PIPELINES": {
+                "mansion_watch_scraper.pipelines.MongoPipeline": 300,
+            },
+        }
+
+        # Add image pipeline only if not in check-only mode
+        if not check_only:
+            self.custom_settings["ITEM_PIPELINES"].update(
+                {"mansion_watch_scraper.pipelines.CustomImagesPipeline": 1}
+            )
 
     def start_requests(self):
         """Start the scraping requests with error handling."""
@@ -197,109 +204,63 @@ class MansionWatchSpider(scrapy.Spider):
                 return
 
             if self.check_only:
-                self._handle_check_only(response)
+                yield from self._handle_check_only(response)
                 return
 
-            # Check if this is a library page (sold-out property)
-            original_url = response.meta.get("original_url", "")
-            is_redirected_to_library = self._is_redirected_to_library(
-                response, original_url
-            )
+            # Extract property name
+            property_name = self._extract_property_name(response)
+            self._validate_property_name(property_name, response.url)
 
-            current_time = get_current_time()
+            # Create a new property document
+            property_id = ObjectId()
 
-            # If redirected to library, update is_active and timestamps
-            if is_redirected_to_library:
-                self.log(
-                    f"Property is sold out: {response.url}", operation="sold_out_check"
-                )
-                # Set next_aggregated_at to year '9999-12-31 23:59:59' to indicate it's sold out
-                sold_out_date = datetime(9999, 12, 31, 23, 59, 59)
-
-                # First get the property ID from the database
-                property_item = self._extract_property_info(response)
-                if not property_item:
-                    self.error(
-                        f"Failed to extract property information: {response.url}",
-                        operation="property_extraction",
-                    )
-                    return
-
-                name_xpath = '//*[@id="contents"]/div[1]/h1/text()'
-                name = response.xpath(name_xpath).get()
-                if not name:
-                    # Try alternative xpath for library pages
-                    name = self._extract_property_name_from_library(response)
-
-                if not name:
-                    name = "物件名不明"
-
-                yield {
-                    "properties": {
-                        "name": name,
-                        "url": original_url,  # Always use original URL
-                        "is_active": False,
-                        "updated_at": get_current_time(),
-                    },
-                    "property_overviews": {
-                        "updated_at": current_time,
-                    },
-                    "common_overviews": {
-                        "updated_at": current_time,
-                    },
-                    "user_properties": {
-                        "line_user_id": self.line_user_id,
-                        "last_aggregated_at": current_time,  # Update last aggregation time
-                        "next_aggregated_at": sold_out_date,  # Far future date to indicate sold out
-                    },
+            # Extract property information
+            property_info = self._extract_property_info(response)
+            if not property_info:
+                self.error("Failed to extract property information", operation="parse")
+                self.results = {
+                    "status": "error",
+                    "error_type": "extraction_failed",
+                    "error_message": "Failed to extract property information",
+                    "url": response.url,
                 }
                 return
 
-            property_item = self._extract_property_info(response)
-            if not property_item:
-                self.error(
-                    f"Failed to extract property information: {response.url}",
-                    operation="property_extraction",
+            # Extract image URLs
+            image_urls = self._extract_image_urls(response)
+            if not image_urls and not self.check_only:
+                self.warning(
+                    f"No image URLs found for property: {property_name}",
+                    operation="image_extraction",
                 )
-                return
 
-            self.log(
-                f"Successfully scraped property: {property_item.name}",
-                operation="property_extraction",
-            )
-
-            property_overview = self._extract_property_overview(
-                response, property_item.name, current_time, property_item.id
-            )
-            common_overview = self._extract_common_overview(
-                response, current_time, property_item.id
-            )
-
-            user_property = {
+            # Create property item
+            property_item = {
+                "properties": property_info,
+                "image_urls": image_urls,
                 "line_user_id": self.line_user_id,
-                "property_id": property_item.id,
-                "last_aggregated_at": current_time,
-                "next_aggregated_at": current_time + timedelta(days=3),
+                "check_only": self.check_only,
+                "property_id": property_id,
             }
 
-            yield {
-                "properties": property_item.model_dump(),
-                "property_overviews": property_overview,
-                "common_overviews": common_overview,
-                "user_properties": user_property,
-                "image_urls": property_item.image_urls,
+            self.results = {
+                "status": "success",
+                "property_info": property_item,
             }
+            self.has_results = True
+
+            yield property_item
 
         except Exception as e:
             self.error(
-                f"Error in parse method. url: {response.url}, error: {e}",
+                f"Error parsing response: {str(e)}",
                 operation="parse_error",
             )
             self.results = {
                 "status": "error",
-                "error_type": e.__class__.__name__,
+                "error_type": type(e).__name__,
                 "error_message": str(e),
-                "url": original_url,
+                "url": response.url,
             }
             return
 
@@ -348,30 +309,26 @@ class MansionWatchSpider(scrapy.Spider):
             response, original_url
         )
 
+        # Set has_results before creating the results dictionary
+        self.has_results = True
+
+        # Create property info dictionary
+        property_info = {
+            "name": property_name,
+            "url": original_url,  # Always use original URL
+            "redirected_url": response.url,  # Add the redirected URL
+            "is_active": not is_redirected_to_library,
+            "updated_at": get_current_time(),
+        }
+
         # Set results for status reporting
         self.results = {
             "status": "success",
-            "property_info": {
-                "properties": {
-                    "name": property_name,
-                    "url": original_url,  # Always use original URL
-                    "redirected_url": response.url,  # Add the redirected URL
-                    "is_active": not is_redirected_to_library,
-                    "updated_at": get_current_time(),
-                },
-            },
+            "property_info": {"properties": property_info},
         }
 
         # Yield the property information for pipeline processing
-        yield {
-            "properties": {
-                "name": property_name,
-                "url": original_url,  # Always use original URL
-                "redirected_url": response.url,  # Add the redirected URL
-                "is_active": not is_redirected_to_library,
-                "updated_at": get_current_time(),
-            }
-        }
+        yield {"properties": property_info}
 
     def _log_http_error(
         self, level: str, context: Dict[str, Any], error: Exception
@@ -436,6 +393,36 @@ class MansionWatchSpider(scrapy.Spider):
         # If not found and it's a library page, try the library page format
         if not property_name and "/library/" in response.url:
             property_name = self._extract_property_name_from_library(response)
+
+        # If still not found, try extracting from title
+        if not property_name:
+            title = response.xpath("//title/text()").get()
+            if title:
+                # Try SUUMO format: "【SUUMO】PropertyName 中古マンション物件情報"
+                if "【" in title and "】" in title:
+                    property_name = (
+                        title.split("【")[1]
+                        .split("】")[1]
+                        .split(" 中古マンション")[0]
+                        .strip()
+                    )
+                else:
+                    # For library pages, try different format
+                    property_name = (
+                        title.split("|")[0].strip() if "|" in title else title
+                    )
+
+        # If still not found, try extracting from h1 tag
+        if not property_name:
+            price_text = response.xpath(
+                "//h1[contains(@class, 'mainIndex') and (contains(@class, 'mainIndexK') or contains(@class, 'mainIndexR'))]/text()"
+            ).get()
+            if price_text:
+                # Extract property name from price text (format: "PropertyName 7880万円（1LDK）")
+                property_name = price_text.split("万円")[0].strip()
+                if property_name:
+                    # Remove any numbers at the end
+                    property_name = re.sub(r"\d+$", "", property_name).strip()
 
         return property_name
 
@@ -1035,3 +1022,22 @@ class MansionWatchSpider(scrapy.Spider):
                 "url": original_url,
             }
             return None
+
+    def closed(self, reason):
+        """Handle spider closure."""
+        if not self.has_results:
+            self.error(
+                f"Spider completed with reason: {reason}, but no results were returned",
+                operation="spider_closed",
+            )
+            self.results = {
+                "status": "error",
+                "error_type": "no_results",
+                "error_message": f"Spider closed with reason: {reason}",
+                "url": self.start_urls[0] if self.start_urls else None,
+            }
+        else:
+            self.info(
+                f"Spider completed successfully with reason: {reason}",
+                operation="spider_closed",
+            )

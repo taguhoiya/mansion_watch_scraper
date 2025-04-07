@@ -17,6 +17,7 @@ from scrapy.crawler import CrawlerProcess
 from scrapy.utils.project import get_project_settings
 
 from app.configs.settings import LOGGING_CONFIG
+from app.services.dates import get_current_time
 from mansion_watch_scraper.spiders.suumo_scraper import MansionWatchSpider
 
 # Set multiprocessing start method to 'spawn' to avoid gRPC fork issues
@@ -347,24 +348,52 @@ class PubSubService:
                     exc_info=True,
                 )
 
+    def _decode_message_data(
+        self, message_body: Dict[str, Any], message_id: str
+    ) -> MessageData:
+        """Decode and validate message data from message body."""
+        encoded_data = message_body.get("data", "{}")
+        if not encoded_data:
+            raise ValueError("Message data is empty")
+
+        data_str = base64.b64decode(encoded_data).decode("utf-8")
+        data_dict = json.loads(data_str)
+
+        # Add timestamp if not present
+        if "timestamp" not in data_dict:
+            data_dict["timestamp"] = get_current_time().isoformat()
+
+        return MessageData(**data_dict)
+
+    def _process_message(self, message_data: MessageData, message_id: str) -> None:
+        """Process a single message based on its type."""
+        if not message_data.url:
+            self._process_batch(message_data, message_id)
+        else:
+            logger.info(
+                f"Running spider for URL: {message_data.url}",
+                extra={
+                    "operation": "spider_start",
+                    "message_id": message_id,
+                    "url": message_data.url,
+                    "line_user_id": message_data.line_user_id,
+                },
+            )
+            results = self.run_spider(
+                url=message_data.url,
+                line_user_id=message_data.line_user_id,
+                check_only=message_data.check_only,
+            )
+            self._handle_spider_results(results, message_data.url)
+
     def message_callback(self, message: Dict[str, Any]) -> None:
-        """Process a Pub/Sub push message.
-
-        For push subscriptions, acknowledgment is handled by the HTTP response.
-        This method only needs to process the message content.
-
-        Args:
-            message: The Pub/Sub message from the push request
-        """
+        """Process a Pub/Sub push message."""
         try:
-            with self._lock:  # Use lock when processing messages
-                # Clear processed messages set periodically
+            with self._lock:
                 if len(self._processed_messages) > 1000:
                     self._processed_messages.clear()
 
-                # Extract message data
                 message_id = message.get("messageId", "unknown")
-
                 logger.info(
                     f"Processing message with ID: {message_id}",
                     extra={"operation": "message_received", "message_id": message_id},
@@ -381,37 +410,12 @@ class PubSubService:
                     return
 
                 self._processed_messages.add(message_id)
+                message_body = message.get("message", {})
+                if not message_body:
+                    raise ValueError("Message body is empty")
 
-                # Decode and validate message data
-                try:
-                    encoded_data = message.get("data", "{}")
-                    data_str = base64.b64decode(encoded_data).decode("utf-8")
-                    data_dict = json.loads(data_str)
-                    message_data = MessageData(**data_dict)
-                except Exception as e:
-                    logger.error(f"Failed to parse message data: {e}")
-                    raise  # Re-raise to trigger HTTP error response
-
-                # If no URL is provided, this is a batch processing request
-                if not message_data.url:
-                    self._process_batch(message_data, message_id)
-                else:
-                    # Regular single property processing
-                    logger.info(
-                        f"Running spider for URL: {message_data.url}",
-                        extra={
-                            "operation": "spider_start",
-                            "message_id": message_id,
-                            "url": message_data.url,
-                            "line_user_id": message_data.line_user_id,
-                        },
-                    )
-                    results = self.run_spider(
-                        url=message_data.url,
-                        line_user_id=message_data.line_user_id,
-                        check_only=message_data.check_only,
-                    )
-                    self._handle_spider_results(results, message_data.url)
+                message_data = self._decode_message_data(message_body, message_id)
+                self._process_message(message_data, message_id)
 
         except Exception as e:
             logger.error(
@@ -424,7 +428,7 @@ class PubSubService:
                 },
                 exc_info=True,
             )
-            raise  # Re-raise to trigger HTTP error response
+            raise
 
 
 def _run_spider_process(
@@ -478,6 +482,10 @@ def _run_spider_process(
                 "GCP_BUCKET_NAME": os.getenv("GCP_BUCKET_NAME"),
                 "GCP_FOLDER_NAME": os.getenv("GCP_FOLDER_NAME"),
                 "IMAGES_STORE": os.getenv("IMAGES_STORE"),
+                # Enable item pipelines
+                "ITEM_PIPELINES": {
+                    "mansion_watch_scraper.pipelines.MongoPipeline": 300,
+                },
             },
             priority="cmdline",
         )

@@ -334,15 +334,19 @@ def process_property_overview(
         update_operation = {
             "$set": {
                 "updated_at": current_time,
-            },
-            # Preserve existing values
-            "$setOnInsert": {
-                k: existing.get(k) for k in existing if k not in ["_id", "updated_at"]
-            },
+            }
         }
-        # Only update price if it exists in new data
+
+        # Create a list of fields to preserve, excluding price if it's in the new data
+        fields_to_preserve = [k for k in existing if k not in ["_id", "updated_at"]]
         if "price" in overview_dict:
+            fields_to_preserve.remove("price")
             update_operation["$set"]["price"] = overview_dict["price"]
+
+        # Add $setOnInsert for preserving other fields
+        update_operation["$setOnInsert"] = {
+            k: existing.get(k) for k in fields_to_preserve
+        }
 
         db[PROPERTY_OVERVIEWS].update_one(query, update_operation)
         return existing["_id"]
