@@ -342,7 +342,10 @@ async def handle_new_property(url: str, line_user_id: str) -> None:
     """Handle scraping of a new property."""
     try:
         scrape_request = ScrapeRequest(
-            url=url, line_user_id=line_user_id, timestamp=get_current_time()
+            url=url,
+            line_user_id=line_user_id,
+            timestamp=get_current_time(),
+            check_only=False,
         )
         result = await queue_scraping(scrape_request)
 
