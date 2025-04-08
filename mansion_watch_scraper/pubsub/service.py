@@ -4,7 +4,7 @@ import logging
 import multiprocessing
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 from logging import LoggerAdapter
 from threading import Lock
 from typing import Any, Dict, Optional, Union
@@ -153,7 +153,7 @@ class MessageData(BaseModel):
     @field_validator("timestamp")
     def validate_timestamp(cls, v):
         """Validate that timestamp is not in the future."""
-        if v > datetime.now(timezone.utc):
+        if v > get_current_time():
             raise ValueError("Timestamp cannot be in the future")
         return v
 

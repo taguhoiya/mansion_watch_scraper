@@ -98,16 +98,25 @@ def publish_batch_message(properties: List[Dict[str, Any]]) -> None:
         os.getenv("GCP_PROJECT_ID"), os.getenv("PUBSUB_TOPIC")
     )
 
-    for property_data in properties:
+    # Group properties by user
+    users_properties = {}
+    for prop in properties:
+        user_id = prop["line_user_id"]
+        if user_id not in users_properties:
+            users_properties[user_id] = []
+        users_properties[user_id].append(prop)
+
+    # Send one message per user
+    for user_id, user_properties in users_properties.items():
         try:
-            # Create message data in the same format
+            # Create message data for all user's properties
             message_data = {
-                "timestamp": property_data["timestamp"],
+                "timestamp": user_properties[0][
+                    "timestamp"
+                ],  # Use timestamp from first property
                 "check_only": True,
-                "line_user_id": property_data["line_user_id"],
+                "line_user_id": user_id,
             }
-            if property_data.get("url"):
-                message_data["url"] = property_data["url"]
 
             # Convert to string and encode
             data = json.dumps(message_data).encode("utf-8")
@@ -117,8 +126,8 @@ def publish_batch_message(properties: List[Dict[str, Any]]) -> None:
                 "Published batch message to Pub/Sub",
                 extra={
                     "operation": "batch_publish",
-                    "line_user_id": property_data["line_user_id"],
-                    "url": property_data.get("url"),
+                    "line_user_id": user_id,
+                    "properties_count": len(user_properties),
                 },
             )
         except Exception as e:
@@ -126,8 +135,7 @@ def publish_batch_message(properties: List[Dict[str, Any]]) -> None:
                 f"Failed to publish message: {str(e)}",
                 extra={
                     "operation": "batch_publish",
-                    "line_user_id": property_data.get("line_user_id"),
-                    "url": property_data.get("url"),
+                    "line_user_id": user_id,
                 },
                 exc_info=True,
             )
