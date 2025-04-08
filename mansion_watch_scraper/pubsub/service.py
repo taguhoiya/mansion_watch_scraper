@@ -4,7 +4,7 @@ import logging
 import multiprocessing
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from logging import LoggerAdapter
 from threading import Lock
 from typing import Any, Dict, Optional, Union
@@ -140,7 +140,27 @@ class MessageData(BaseModel):
             raise ValueError("line_user_id must start with U")
         return v
 
+    @field_validator("url")
+    def validate_url(cls, v):
+        """Validate that the URL is a valid SUUMO property URL."""
+        if v is not None:
+            if not v.startswith("https://suumo.jp"):
+                raise ValueError("URL must start with https://suumo.jp")
+            if "/ms/" not in v:
+                raise ValueError("URL must contain /ms/ (mansion) path")
+        return v
+
+    @field_validator("timestamp")
+    def validate_timestamp(cls, v):
+        """Validate that timestamp is not in the future."""
+        if v > datetime.now(timezone.utc):
+            raise ValueError("Timestamp cannot be in the future")
+        return v
+
     class Config:
+        """Pydantic model configuration."""
+
+        json_encoders = {datetime: lambda v: v.isoformat()}
         extra = "ignore"  # Ignore extra fields in the input data
 
 
