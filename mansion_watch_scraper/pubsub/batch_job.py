@@ -1,4 +1,6 @@
+import json
 import logging
+import logging.config
 import os
 from typing import Any, Dict, List
 
@@ -108,7 +110,7 @@ def publish_batch_message(properties: List[Dict[str, Any]]) -> None:
                 message_data["url"] = property_data["url"]
 
             # Convert to string and encode
-            data = str(message_data).encode("utf-8")
+            data = json.dumps(message_data).encode("utf-8")
             future = publisher.publish(topic_path, data)
             future.result()  # Wait for message to be published
             logger.info(
