@@ -125,7 +125,7 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
             )
             raise ValueError("Invalid message data format")
 
-        required_fields = ["timestamp", "url", "line_user_id"]
+        required_fields = ["timestamp"]
         missing_fields = [
             field for field in required_fields if field not in message_data
         ]

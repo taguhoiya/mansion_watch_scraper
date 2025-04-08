@@ -336,7 +336,6 @@ class PubSubService:
                     check_only=property_message_data.check_only,
                 )
                 self._handle_spider_results(results, property_message_data.url)
-                break  # Break after first property for testing
             except Exception as e:
                 logger.error(
                     f"Error processing batch property {prop['url']}: {str(e)}",
