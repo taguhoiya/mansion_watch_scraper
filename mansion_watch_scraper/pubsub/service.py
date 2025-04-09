@@ -406,41 +406,82 @@ class PubSubService:
             self._handle_spider_results(results, message_data.url)
 
     def message_callback(self, message: Dict[str, Any]) -> None:
-        """Process a Pub/Sub push message."""
+        """Process a Pub/Sub push message.
+
+        Args:
+            message: The push message from Cloud Run, with structure:
+                {
+                    "message": {
+                        "attributes": dict,
+                        "data": "base64 encoded string",
+                        "messageId": string,
+                        "publishTime": string
+                    },
+                    "subscription": string
+                }
+        """
         try:
             with self._lock:
                 if len(self._processed_messages) > 1000:
                     self._processed_messages.clear()
 
-                message_id = message.get("messageId", "unknown")
-                logger.info(
-                    f"Processing message with ID: {message_id}",
-                    extra={"operation": "message_received", "message_id": message_id},
-                )
+                # Extract message details from Cloud Run push structure
+                pubsub_message = message.get("message")
+                if not pubsub_message:
+                    raise ValueError("Invalid Pub/Sub message: missing 'message' field")
 
+                message_id = pubsub_message.get("messageId", "unknown")
+                publish_time = pubsub_message.get("publishTime")
+                subscription = message.get("subscription", "unknown")
+
+                # Check if we've already processed this message
                 if message_id in self._processed_messages:
                     logger.info(
-                        f"Message {message_id} already processed, skipping",
+                        "Message already processed, skipping",
                         extra={
                             "operation": "message_deduplication",
                             "message_id": message_id,
+                            "subscription": subscription,
                         },
                     )
                     return
 
-                self._processed_messages.add(message_id)
-                message_body = message.get("message", {})
-                if not message_body:
-                    raise ValueError("Message body is empty")
+                logger.info(
+                    "Processing Pub/Sub message",
+                    extra={
+                        "operation": "message_processing",
+                        "message_id": message_id,
+                        "publish_time": publish_time,
+                        "subscription": subscription,
+                    },
+                )
 
-                message_data = self._decode_message_data(message_body, message_id)
+                # Mark as processed
+                self._processed_messages.add(message_id)
+
+                # Decode and process message data
+                message_data = self._decode_message_data(pubsub_message, message_id)
                 self._process_message(message_data, message_id)
 
+        except ValueError as e:
+            # Log validation errors
+            logger.error(
+                "Invalid message format",
+                extra={
+                    "operation": "message_validation_error",
+                    "error": str(e),
+                    "error_type": "ValueError",
+                    "message_id": message_id if "message_id" in locals() else "unknown",
+                },
+                exc_info=True,
+            )
+            raise
         except Exception as e:
+            # Log processing errors
             logger.error(
                 "Error processing message",
                 extra={
-                    "operation": "message_error",
+                    "operation": "message_processing_error",
                     "message_id": message_id if "message_id" in locals() else "unknown",
                     "error": str(e),
                     "error_type": e.__class__.__name__,

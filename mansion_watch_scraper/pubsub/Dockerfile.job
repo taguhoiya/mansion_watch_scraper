@@ -1,6 +1,5 @@
-FROM --platform=linux/amd64 python:3.11.7-slim
-
-WORKDIR /app
+# Use amd64 platform for Cloud Run compatibility
+FROM --platform=linux/amd64 python:3.11.7-slim AS builder
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -8,42 +7,44 @@ RUN apt-get update && apt-get install -y \
   python3-dev \
   && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first to leverage Docker cache
-COPY mansion_watch_scraper/requirements.txt .
-RUN pip install --upgrade pip && \
-  pip install --no-cache-dir -r requirements.txt
+# Set working directory
+WORKDIR /app
 
-# Copy only the necessary files for the batch job
+# Copy requirements first to leverage Docker cache
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy necessary files
 COPY mansion_watch_scraper/pubsub/batch_job.py /app/mansion_watch_scraper/pubsub/
-COPY app/configs /app/app/configs
-COPY app/services /app/app/services
+COPY app/configs /app/app/configs/
+COPY app/services /app/app/services/
 COPY .env.prod /app/.env
+COPY service-account.json /app/service-account.json
+
+# Create a new stage for the final image
+FROM --platform=linux/amd64 python:3.11.7-slim
+
+WORKDIR /app
+
+# Copy installed packages and application files from builder
+COPY --from=builder /usr/local/lib/python3.11/site-packages/ /usr/local/lib/python3.11/site-packages/
+COPY --from=builder /app /app
 
 # Set environment variables
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 ENV GRPC_DNS_RESOLVER=native
-
-# GCP environment variables for local execution
-ENV GOOGLE_APPLICATION_CREDENTIALS=/app/service-account.json
 ENV PUBSUB_TOPIC=mansion-watch-scraper-topic
 ENV PUBSUB_SUBSCRIPTION=mansion-watch-scraper-sub-push
 ENV GCP_PROJECT_ID=daring-night-451212-a8
-
-# MongoDB environment variables
-ENV MONGO_URI="mongodb+srv://mansionwatch:mansiondaisuki@mansionwatch.mbt6a.mongodb.net/?retryWrites=true&w=majority&appName=MansionWatch"
-ENV MONGO_DATABASE="mansion_watch"
-
-# MongoDB collection names
-ENV COLLECTION_USER_PROPERTIES="user_properties"
-ENV COLLECTION_PROPERTIES="properties"
-ENV COLLECTION_USERS="users"
-
-# Copy service account file
-COPY service-account.json /app/service-account.json
+ENV MONGO_URI=mongodb+srv://mansionwatch:mansiondaisuki@mansionwatch.mbt6a.mongodb.net/?retryWrites=true&w=majority&appName=MansionWatch
+ENV MONGO_DATABASE=mansion_watch
+ENV COLLECTION_USER_PROPERTIES=user_properties
+ENV COLLECTION_PROPERTIES=properties
+ENV COLLECTION_USERS=users
 
 # Add proper signal handling
 STOPSIGNAL SIGTERM
 
-# Run the batch job script directly (not the HTTP server)
+# Run the batch job
 CMD ["python", "-m", "mansion_watch_scraper.pubsub.batch_job"]
