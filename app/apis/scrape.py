@@ -19,7 +19,7 @@ batch_settings = pubsub_v1.types.BatchSettings(
 _publisher = None
 
 
-def get_publisher(line_user_id: str):
+def get_publisher():
     """Get or create Pub/Sub publisher client with batch settings."""
     global _publisher
     if _publisher is None:
