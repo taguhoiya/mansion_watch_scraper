@@ -1,456 +1,173 @@
 import base64
-import http.server
 import json
 import logging
 import os
-from typing import Any, Dict, List
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Dict, List, Optional, Union
 
-import pymongo
+from google.auth.transport import requests
+from google.oauth2 import id_token
 
-from app.configs.settings import LOGGING_CONFIG
-from app.services.dates import get_current_time
-from mansion_watch_scraper.pubsub.service import PubSubService
+from mansion_watch_scraper.models.property import Property
+from mansion_watch_scraper.models.user_property import UserProperty
+from mansion_watch_scraper.utils.mongo import get_mongo_client
 
-# Configure structured logging
-logging.config.dictConfig(LOGGING_CONFIG)
 logger = logging.getLogger(__name__)
 
-# Add module context to logger
-logger = logging.LoggerAdapter(
-    logger,
-    {
-        "component": "pubsub_health",
-        "operation": "health_check",
-        "user_id": None,  # Initialize with None
-        "url": None,  # Initialize with None
-    },
-)
 
-# Global variables for MongoDB connection
-mongo_client = None
-db = None
+class UnifiedHandler(BaseHTTPRequestHandler):
+    def _add_cors_headers(self):
+        """Add CORS headers to the response"""
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header("Access-Control-Allow-Credentials", "false")
 
-# Initialize PubSubService once
-pubsub_service = PubSubService()
-
-
-class UnifiedHandler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        """Handle GET requests for health checks."""
-        logger.info(
-            "Health check request received",
-            extra={
-                "operation": "health_check",
-                "user_id": None,
-                "url": None,
-            },
-        )
-        self.send_response(200)
+    def _send_response(self, status_code: int, data: Dict = None):
+        """Send response with CORS headers"""
+        self.send_response(status_code)
+        self._add_cors_headers()
         self.send_header("Content-Type", "application/json")
         self.end_headers()
-        self.wfile.write(json.dumps({"status": "ok"}).encode("utf-8"))
+        if data:
+            self.wfile.write(json.dumps(data).encode())
 
-    def verify_cloud_run_authentication(self) -> bool:
-        """Verify the request is from Cloud Run Pub/Sub push.
+    def do_OPTIONS(self):
+        """Handle CORS preflight requests"""
+        self._send_response(200)
 
-        For Pub/Sub push subscriptions to Cloud Run, Google Cloud automatically handles
-        authentication using the service account specified in the subscription configuration.
-        The request must include an Authorization header with a Google-signed JWT token.
-
-        Returns:
-            bool: True if authenticated, False otherwise
-        """
-        try:
-            # For health check requests (GET), no auth needed
-            if self.command == "GET":
-                return True
-
-            # TODO: Uncomment this when we have a way to verify the token in gcloud run job
-            # # For Pub/Sub push messages, verify Authorization header
-            # auth_header = self.headers.get("Authorization", "")
-            # if not auth_header.startswith("Bearer "):
-            #     logger.error(
-            #         "Missing or invalid Authorization header",
-            #         extra={
-            #             "operation": "auth_check",
-            #             "auth_header": (
-            #                 auth_header[:10] + "..." if auth_header else "None"
-            #             ),
-            #         },
-            #     )
-            #     return False
-
-            # In Cloud Run, the token is automatically validated by the platform
-            # If we receive the request, it means Cloud Run has already authenticated it
-            return True
-
-        except Exception as e:
-            logger.error(
-                f"Authentication verification failed: {str(e)}",
-                extra={
-                    "error": str(e),
-                    "error_type": e.__class__.__name__,
-                },
-                exc_info=True,
-            )
-            return False
-
-    def check_retry_count(self) -> bool:
-        """Check if message has exceeded retry attempts.
-
-        Cloud Run's Pub/Sub retry count is in the X-CloudPubSub-DeliveryAttempt header.
-        After 5 retries (value of 6), we'll stop retrying to prevent excessive processing.
-
-        Returns:
-            bool: True if should continue processing, False if should stop
-        """
-        try:
-            retry_count = int(self.headers.get("X-CloudPubSub-DeliveryAttempt", "1"))
-            if retry_count > 5:  # Stop after 5 retries (less than Cloud Run's max of 7)
-                logger.warning(
-                    "Message exceeded retry limit",
-                    extra={
-                        "operation": "retry_check",
-                        "retry_count": retry_count,
-                    },
-                )
-                self._send_error(
-                    429,  # Too Many Requests
-                    "Message exceeded retry limit",
-                    retry=False,
-                )
-                return False
-            return True
-        except ValueError:
-            # If header is invalid, continue processing
-            return True
-
-    def _decode_pubsub_data(self, pubsub_message: dict, subscription: str) -> dict:
-        """Decode the data field from a Pub/Sub message."""
-        if subscription == "direct":
-            return pubsub_message
-
-        try:
-            encoded_data = pubsub_message["data"]
-            decoded_data = base64.b64decode(encoded_data).decode("utf-8")
-            return json.loads(decoded_data)
-        except Exception as e:
-            logger.error(
-                "Failed to decode message data",
-                extra={
-                    "error": str(e),
-                    "error_type": e.__class__.__name__,
-                    "encoded_data": pubsub_message.get("data"),
-                },
-            )
-            raise ValueError(f"Invalid message data format: {str(e)}")
-
-    def _validate_message_data(self, message_data: dict, subscription: str) -> None:
-        """Validate required fields in message data."""
-        if not isinstance(message_data, dict):
-            logger.error(
-                "Invalid message data format",
-                extra={"subscription": subscription, "message_data": message_data},
-            )
-            raise ValueError("Invalid message data format")
-
-        required_fields = ["timestamp"]
-        missing_fields = [
-            field for field in required_fields if field not in message_data
-        ]
-        if missing_fields:
-            logger.error(
-                "Missing required fields in message data",
-                extra={
-                    "subscription": subscription,
-                    "missing_fields": missing_fields,
-                    "message_data": message_data,
-                },
-            )
-            raise ValueError(f"Missing required fields: {', '.join(missing_fields)}")
-
-    def parse_pubsub_message(self, body: bytes) -> tuple[dict, str, dict]:
-        """Parse and validate the Pub/Sub message from request body."""
-        try:
-            body_json = json.loads(body.decode("utf-8"))
-        except json.JSONDecodeError as e:
-            logger.error(
-                "Failed to decode JSON",
-                extra={"error": str(e), "body": body.decode("utf-8", errors="ignore")},
-            )
-            raise ValueError("Invalid JSON payload")
-
-        # Handle both direct messages and Pub/Sub push messages
-        if isinstance(body_json, dict) and "message" in body_json:
-            pubsub_message = body_json["message"]
-            subscription = body_json.get("subscription", "unknown")
-        else:
-            pubsub_message = body_json
-            subscription = "direct"
-
-        if not isinstance(pubsub_message, dict):
-            raise ValueError("Invalid message format")
-
-        message_data = self._decode_pubsub_data(pubsub_message, subscription)
-        self._validate_message_data(message_data, subscription)
-
-        return pubsub_message, subscription, message_data
-
-    def log_message_processing(
-        self, message_data: dict, pubsub_message: dict, subscription: str
-    ) -> None:
-        """Log appropriate message based on the message type."""
-        user_id = message_data.get("line_user_id")
-        url = message_data.get("url")
-
-        # Update logger context
-        logger.extra.update({"user_id": user_id, "url": url})
-
-        log_extra = {
-            "operation": "pubsub_push",
-            "message_id": pubsub_message.get("messageId"),
-            "subscription": subscription,
-        }
-
-        if url and user_id:
-            log_extra.update({"user_id": user_id, "url": url})
-            logger.info(
-                "Processing Pub/Sub message for specific property", extra=log_extra
-            )
-        elif user_id:
-            log_extra.update({"user_id": user_id})
-            logger.info("Processing Pub/Sub message for user batch", extra=log_extra)
-        else:
-            logger.info(
-                "Processing Pub/Sub message for all users batch", extra=log_extra
-            )
+    def do_GET(self):
+        """Handle GET requests for health checks"""
+        self._send_response(200, {"status": "ok"})
 
     def do_POST(self):
-        """Handle POST requests for Pub/Sub push messages."""
+        """Handle POST requests for Pub/Sub messages"""
         try:
             # Verify Cloud Run authentication
-            if not self.verify_cloud_run_authentication():
-                self._send_error(403, "Unauthorized")
+            auth_header = self.headers.get("Authorization")
+            if not auth_header or not auth_header.startswith("Bearer "):
+                self._send_response(401, {"error": "No credentials provided"})
+                return
+
+            token = auth_header.split(" ")[1]
+            try:
+                audience = os.getenv("CLOUD_RUN_URL")
+                claims = id_token.verify_oauth2_token(
+                    token, requests.Request(), audience=audience
+                )
+                if not claims.get("email_verified"):
+                    self._send_response(401, {"error": "Email not verified"})
+                    return
+            except Exception as e:
+                logger.error(f"Token verification failed: {e}")
+                self._send_response(401, {"error": "Invalid credentials"})
                 return
 
             # Check retry count
-            if not self.check_retry_count():
+            retry_count = int(self.headers.get("Ce-Retrycount", "0"))
+            if retry_count > 5:
+                logger.warning(f"Too many retries ({retry_count}), dropping message")
+                self._send_response(200)
                 return
 
-            # Get content length and validate
+            # Get message data
             content_length = int(self.headers.get("Content-Length", 0))
-            if content_length == 0:
-                self._send_error(400, "Empty request body", retry=False)
+            message_data = self.rfile.read(content_length)
+            message = json.loads(message_data)
+
+            if not message.get("message", {}).get("data"):
+                self._send_response(400, {"error": "No message data"})
                 return
 
-            # Read request body
-            body = self.rfile.read(content_length)
+            # Decode Pub/Sub data
+            pubsub_data = base64.b64decode(message["message"]["data"]).decode()
+            data = json.loads(pubsub_data)
 
-            try:
-                # Parse and validate message
-                pubsub_message, subscription, message_data = self.parse_pubsub_message(
-                    body
-                )
+            # Process message
+            logger.info(f"Processing message: {data}")
+            process_message(data)
 
-                # Log message processing
-                self.log_message_processing(message_data, pubsub_message, subscription)
-
-                # Process the message - pass the entire body_json
-                body_json = json.loads(body.decode("utf-8"))
-                pubsub_service.message_callback(body_json)
-
-                # Send success response
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"status": "ok"}).encode("utf-8"))
-
-            except ValueError as e:
-                # Handle validation errors - don't retry
-                self._send_error(400, str(e), retry=False)
-            except Exception as e:
-                # Handle processing errors - allow retry
-                logger.error(
-                    "Error processing Pub/Sub message",
-                    extra={
-                        "operation": "pubsub_push",
-                        "error": str(e),
-                        "error_type": e.__class__.__name__,
-                        "message_id": (
-                            pubsub_message.get("messageId")
-                            if "pubsub_message" in locals()
-                            else None
-                        ),
-                        "subscription": (
-                            subscription if "subscription" in locals() else None
-                        ),
-                    },
-                    exc_info=True,
-                )
-                self._send_error(500, f"Error processing message: {str(e)}", retry=True)
+            self._send_response(200, {"status": "success"})
 
         except Exception as e:
-            # Handle unexpected errors - allow retry
-            logger.error(
-                "Error handling POST request",
-                extra={
-                    "operation": "pubsub_push",
-                    "error": str(e),
-                    "error_type": e.__class__.__name__,
-                },
-                exc_info=True,
-            )
-            self._send_error(500, f"Internal server error: {str(e)}", retry=True)
-
-    def _send_error(self, code: int, message: str, retry: bool = True):
-        """Helper method to send error responses with retry control.
-
-        According to Cloud Pub/Sub documentation, to prevent message retries and acknowledge
-        the message as processed (even if failed), we should:
-        1. Return a 200 status code
-        2. Set X-CloudPubSub-DeliveryAttempt header
-
-        Args:
-            code: HTTP status code (will be ignored for Pub/Sub messages)
-            message: Error message
-            retry: Whether Pub/Sub should retry the message (ignored, always set to false)
-        """
-        # For Pub/Sub messages, always return 200 to acknowledge the message
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-
-        # Tell Pub/Sub not to retry by setting the delivery attempt header
-        self.send_header("X-CloudPubSub-DeliveryAttempt", "1")
-
-        self.end_headers()
-        self.wfile.write(
-            json.dumps(
-                {"status": "error", "error": message, "original_status_code": code}
-            ).encode("utf-8")
-        )
+            logger.error(f"Error processing request: {e}")
+            self._send_response(500, {"error": str(e)})
 
 
-def get_properties_for_batch(line_user_id: str = None) -> List[Dict[str, Any]]:
-    """Get all properties that need to be processed in batch.
+def init_mongo():
+    """Initialize MongoDB connection"""
+    mongo_uri = os.getenv("MONGO_URI")
+    if not mongo_uri:
+        logger.error("MONGO_URI environment variable not set")
+        sys.exit(1)
 
-    Args:
-        line_user_id: Optional LINE user ID to filter properties for a specific user
-
-    Returns:
-        List of ScrapeRequest-compatible dictionaries containing:
-        - timestamp: Current time (ISO format string)
-        - url: Property URL
-        - line_user_id: User's LINE ID
-        - check_only: True (only checking for updates)
-    """
-    db = get_db()
-    user_properties_collection = db[os.getenv("COLLECTION_USER_PROPERTIES")]
-    current_time = get_current_time()
-
-    # Base match stage for aggregation pipeline
-    match_stage = {"next_aggregated_at": {"$lte": current_time}}
-
-    # Add line_user_id filter if provided
-    if line_user_id:
-        match_stage["line_user_id"] = line_user_id
-
-    # Use aggregation pipeline to join collections and filter
-    pipeline = [
-        # First stage: Match user properties that need aggregation
-        {"$match": match_stage},
-        # Second stage: Group by property_id and preserve line_user_id
-        {
-            "$group": {
-                "_id": "$property_id",
-                "line_user_id": {"$first": "$line_user_id"},  # Keep the line_user_id
-            }
-        },
-        # Third stage: Join with properties collection
-        {
-            "$lookup": {
-                "from": os.getenv("COLLECTION_PROPERTIES"),
-                "localField": "_id",
-                "foreignField": "_id",
-                "as": "property",
-            }
-        },
-        # Fourth stage: Unwind the property array (from lookup)
-        {"$unwind": "$property"},
-        # Fifth stage: Filter active properties
-        {"$match": {"property.is_active": True}},
-        # Final stage: Project only the needed fields in ScrapeRequest format
-        {
-            "$project": {
-                "_id": 0,
-                "timestamp": {
-                    "$dateToString": {
-                        "format": "%Y-%m-%dT%H:%M:%S.%LZ",
-                        "date": current_time,
-                    }
-                },
-                "url": "$property.url",
-                "line_user_id": 1,  # Use the preserved line_user_id
-                "check_only": {"$literal": True},
-            }
-        },
-    ]
-
-    return list(user_properties_collection.aggregate(pipeline))
-
-
-def check_user_exists(line_user_id: str) -> bool:
-    """Check if a user exists in the database.
-
-    Args:
-        line_user_id: LINE user ID to check
-
-    Returns:
-        bool: True if user exists, False otherwise
-    """
-    db = get_db()
-    users_collection = db[os.getenv("COLLECTION_USERS")]
-    return users_collection.count_documents({"line_user_id": line_user_id}) > 0
-
-
-def main():
-    """Start the HTTP server."""
     try:
-        logger.info("Starting main function")
+        client = get_mongo_client()
+        db = client.get_default_database()
+        logger.info("Connected to MongoDB")
+        return db
+    except Exception as e:
+        logger.error(f"Failed to connect to MongoDB: {e}")
+        sys.exit(1)
 
-        # Initialize the database connection
-        init_db()  # Ensure this function is defined and initializes the MongoDB client
 
-        port = int(os.environ.get("PORT", 8080))
-        logger.info(f"Environment variables: {dict(os.environ)}")
+def get_properties_for_batch(
+    db, line_user_id: Optional[str] = None
+) -> List[Union[Property, UserProperty]]:
+    """Get properties for batch processing"""
+    try:
+        if line_user_id:
+            # Get properties for specific user
+            collection = db.user_properties
+            query = {"line_user_id": line_user_id}
+        else:
+            # Get all properties
+            collection = db.properties
+            query = {}
 
-        server = http.server.HTTPServer(("0.0.0.0", port), UnifiedHandler)
-        logger.info(f"Server created, listening on 0.0.0.0:{port}")
-        server.serve_forever()
+        properties = list(collection.find(query))
+        logger.info(f"Found {len(properties)} properties for batch processing")
+        return properties
+    except Exception as e:
+        logger.error(f"Error getting properties for batch: {e}")
+        return []
+
+
+def process_message(data: Dict):
+    """Process Pub/Sub message"""
+    try:
+        db = init_mongo()
+        line_user_id = data.get("line_user_id")
+        check_only = data.get("check_only", False)
+
+        properties = get_properties_for_batch(db, line_user_id)
+        if not properties:
+            logger.warning("No properties found for batch processing")
+            return
+
+        if check_only:
+            logger.info("Check only mode, skipping updates")
+            return
+
+        # Process properties (implementation depends on your needs)
+        for property in properties:
+            logger.info(f"Processing property: {property.get('_id')}")
+            # Add your property processing logic here
 
     except Exception as e:
-        logger.error(f"Failed to start server: {str(e)}", exc_info=True)
+        logger.error(f"Error processing message: {e}")
         raise
 
 
-def init_db():
-    """Initialize the MongoDB client and database."""
-    global mongo_client, db
-    mongo_client = pymongo.MongoClient(os.getenv("MONGO_URI"))
-    db = mongo_client[os.getenv("MONGO_DATABASE")]
-    logger.info("MongoDB client and database initialized")
-
-
-def get_db():
-    """Get the MongoDB database instance.
-
-    Returns:
-        pymongo.database.Database: The MongoDB database instance
-    """
-    if "db" not in globals() or globals()["db"] is None:
-        init_db()
-    return globals()["db"]
+def run_server(port: int):
+    """Run the HTTP server"""
+    server = HTTPServer(("", port), UnifiedHandler)
+    logger.info(f"Starting server on port {port}")
+    server.serve_forever()
 
 
 if __name__ == "__main__":
-    logger.info("Starting health check server")
-    main()
+    logging.basicConfig(level=logging.INFO)
+    port = int(os.getenv("PORT", "8080"))
+    run_server(port)
