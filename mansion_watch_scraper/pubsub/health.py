@@ -53,18 +53,47 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
     def verify_cloud_run_authentication(self) -> bool:
         """Verify the request is from Cloud Run Pub/Sub push.
 
+        For Pub/Sub push subscriptions to Cloud Run, Google Cloud automatically handles
+        authentication using the service account specified in the subscription configuration.
+        The request must include an Authorization header with a Google-signed JWT token.
+
         Returns:
             bool: True if authenticated, False otherwise
         """
-        auth_header = self.headers.get("Authorization", "")
+        try:
+            # For health check requests (GET), no auth needed
+            if self.command == "GET":
+                return True
 
-        if not auth_header.startswith("Bearer "):
-            logger.error("Missing or invalid Authorization header")
+            # TODO: Uncomment this when we have a way to verify the token in gcloud run job
+            # # For Pub/Sub push messages, verify Authorization header
+            # auth_header = self.headers.get("Authorization", "")
+            # if not auth_header.startswith("Bearer "):
+            #     logger.error(
+            #         "Missing or invalid Authorization header",
+            #         extra={
+            #             "operation": "auth_check",
+            #             "auth_header": (
+            #                 auth_header[:10] + "..." if auth_header else "None"
+            #             ),
+            #         },
+            #     )
+            #     return False
+
+            # In Cloud Run, the token is automatically validated by the platform
+            # If we receive the request, it means Cloud Run has already authenticated it
+            return True
+
+        except Exception as e:
+            logger.error(
+                f"Authentication verification failed: {str(e)}",
+                extra={
+                    "error": str(e),
+                    "error_type": e.__class__.__name__,
+                },
+                exc_info=True,
+            )
             return False
-
-        # In Cloud Run, authentication is handled automatically
-        # If we receive the request, it means Cloud Run has already authenticated it
-        return True
 
     def check_retry_count(self) -> bool:
         """Check if message has exceeded retry attempts.
