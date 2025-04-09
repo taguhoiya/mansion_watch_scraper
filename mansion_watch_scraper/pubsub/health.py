@@ -35,6 +35,21 @@ pubsub_service = PubSubService()
 
 
 class UnifiedHandler(http.server.BaseHTTPRequestHandler):
+    def _add_cors_headers(self):
+        """Add CORS headers to the response."""
+        # TODO: Modify Access-Control-Allow-Origin to frontend and local urls
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header("Access-Control-Max-Age", "3600")
+
+    def do_OPTIONS(self):
+        """Handle OPTIONS requests for CORS preflight."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self._add_cors_headers()
+        self.end_headers()
+
     def do_GET(self):
         """Handle GET requests for health checks."""
         logger.info(
@@ -47,6 +62,7 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
         )
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
+        self._add_cors_headers()
         self.end_headers()
         self.wfile.write(json.dumps({"status": "ok"}).encode("utf-8"))
 
@@ -262,6 +278,7 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
                 # Send success response
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
+                self._add_cors_headers()
                 self.end_headers()
                 self.wfile.write(json.dumps({"status": "ok"}).encode("utf-8"))
 
@@ -318,6 +335,7 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
         # For Pub/Sub messages, always return 200 to acknowledge the message
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
+        self._add_cors_headers()
 
         # Tell Pub/Sub not to retry by setting the delivery attempt header
         self.send_header("X-CloudPubSub-DeliveryAttempt", "1")
