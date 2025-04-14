@@ -17,16 +17,27 @@ batch_settings = pubsub_v1.types.BatchSettings(
 )
 
 _publisher = None
+_publisher_options = None
 
 
-def get_publisher():
-    """Get or create Pub/Sub publisher client with batch settings."""
-    global _publisher
+def get_publisher(line_user_id: str = None):
+    """Get or create Pub/Sub publisher client with batch settings.
+
+    Args:
+        line_user_id: Optional LINE user ID (stored but not used for ordering)
+
+    Returns:
+        PublisherClient: The Pub/Sub publisher client
+    """
+    global _publisher, _publisher_options
+
+    # Store the line_user_id for logging purposes
+    if line_user_id and _publisher_options != line_user_id:
+        _publisher_options = line_user_id
+
     if _publisher is None:
-        _publisher = pubsub_v1.PublisherClient(
-            batch_settings=batch_settings,
-            # ordering_key=line_user_id,  # Use line_user_id as ordering key
-        )
+        _publisher = pubsub_v1.PublisherClient(batch_settings=batch_settings)
+
     return _publisher
 
 
@@ -35,6 +46,7 @@ def get_topic_path():
     # Get project ID and topic name from environment variables
     project_id = os.getenv("GCP_PROJECT_ID", "daring-night-451212-a8")
     topic_name = os.getenv("PUBSUB_TOPIC", "mansion-watch-scraper-topic")
+    # Call get_publisher with no parameters since we don't need ordering for this call
     return get_publisher().topic_path(project_id, topic_name)
 
 
@@ -93,7 +105,7 @@ async def queue_scraping(request: ScrapeRequest) -> Dict[str, str]:
         message_data = request.model_dump_json().encode("utf-8")
 
         # Get publisher and topic path
-        publisher = get_publisher()
+        publisher = get_publisher(request.line_user_id)
         topic_path = get_topic_path()
 
         # Publish message with callback
