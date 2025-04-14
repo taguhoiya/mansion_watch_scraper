@@ -17,24 +17,27 @@ batch_settings = pubsub_v1.types.BatchSettings(
 )
 
 _publisher = None
+_publisher_options = None
 
 
 def get_publisher(line_user_id: str = None):
     """Get or create Pub/Sub publisher client with batch settings.
 
     Args:
-        line_user_id: Optional LINE user ID for message ordering
+        line_user_id: Optional LINE user ID (stored but not used for ordering)
 
     Returns:
         PublisherClient: The Pub/Sub publisher client
     """
-    global _publisher
-    if _publisher is None:
-        publisher_args = {"batch_settings": batch_settings}
-        if line_user_id:  # Only add ordering_key if line_user_id is provided
-            publisher_args["ordering_key"] = line_user_id
+    global _publisher, _publisher_options
 
-        _publisher = pubsub_v1.PublisherClient(**publisher_args)
+    # Store the line_user_id for logging purposes
+    if line_user_id and _publisher_options != line_user_id:
+        _publisher_options = line_user_id
+
+    if _publisher is None:
+        _publisher = pubsub_v1.PublisherClient(batch_settings=batch_settings)
+
     return _publisher
 
 
