@@ -296,8 +296,6 @@ def process_user_property(
             "last_succeeded_at": current_time,
             "last_aggregated_at": current_time,
             "next_aggregated_at": current_time + timedelta(days=3),
-            "created_at": current_time,
-            "updated_at": current_time,
         }
     )
     result = db[USER_PROPERTIES].insert_one(user_property_dict)

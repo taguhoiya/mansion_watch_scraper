@@ -301,6 +301,51 @@ class PubSubService:
             data = message.data
         return message_id, data
 
+    def _extract_from_dict(self, property_info: Dict[str, Any]) -> Optional[str]:
+        """Extract property name from dictionary structure.
+
+        Args:
+            property_info: Dictionary containing property information
+
+        Returns:
+            Property name if found, None otherwise
+        """
+        # Dictionary with properties key
+        if "properties" in property_info:
+            if isinstance(property_info["properties"], dict):
+                return property_info["properties"].get("name")
+            # Direct properties object in a dict
+            elif hasattr(property_info["properties"], "name"):
+                return property_info["properties"].name
+        # Dictionary with direct name key
+        elif "name" in property_info:
+            return property_info["name"]
+        return None
+
+    def _extract_from_model(self, property_info: Any) -> Optional[str]:
+        """Extract property name from model/object structure.
+
+        Args:
+            property_info: Model containing property information
+
+        Returns:
+            Property name if found, None otherwise
+        """
+        # Pydantic model with properties attribute
+        if hasattr(property_info, "properties"):
+            if hasattr(property_info.properties, "name"):
+                return property_info.properties.name
+            # If properties is a dictionary
+            elif (
+                isinstance(property_info.properties, dict)
+                and "name" in property_info.properties
+            ):
+                return property_info.properties["name"]
+        # Pydantic model with direct name attribute
+        elif hasattr(property_info, "name"):
+            return property_info.name
+        return None
+
     def _extract_property_name(self, property_info: Any) -> str:
         """Extract property name from property_info object safely.
 
@@ -310,23 +355,21 @@ class PubSubService:
             Property name or "unknown" if not found
         """
         try:
-            # Check various possible structures
+            # Try dictionary approach
             if isinstance(property_info, dict):
-                # Dictionary with properties key
-                if "properties" in property_info and isinstance(
-                    property_info["properties"], dict
-                ):
-                    return property_info["properties"].get("name", "unknown")
-                # Dictionary with direct name key
-                elif "name" in property_info:
-                    return property_info["name"]
-            # Pydantic model with properties attribute
-            elif hasattr(property_info, "properties"):
-                if hasattr(property_info.properties, "name"):
-                    return property_info.properties.name
-            # Pydantic model with direct name attribute
-            elif hasattr(property_info, "name"):
-                return property_info.name
+                name = self._extract_from_dict(property_info)
+                if name:
+                    return name
+
+            # Try object/model approach
+            name = self._extract_from_model(property_info)
+            if name:
+                return name
+
+            # Log the structure to help with debugging
+            logger.debug(f"Property info structure: {type(property_info)}")
+            if hasattr(property_info, "__dict__"):
+                logger.debug(f"Property info attributes: {property_info.__dict__}")
         except Exception as e:
             logger.warning(f"Error extracting property name: {str(e)}")
 
@@ -343,7 +386,7 @@ class PubSubService:
                 logger.error(f"Error message: {results.get('error_message')}")
         elif status == "success":
             property_info = results.get("property_info", {})
-            processing_status = results.get("status", "unknown")
+            processing_status = results.get("processing_status", "checked")
 
             # Extract property name using helper method
             property_name = self._extract_property_name(property_info)
