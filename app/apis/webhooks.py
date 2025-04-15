@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import re
+from datetime import timedelta
 from typing import List, NamedTuple, Optional, Protocol
 from urllib.parse import urlparse
 
@@ -109,13 +110,16 @@ async def add_user_property(
 
     _, user_properties_collection, _ = collections
     current_time = get_current_time()
+    next_time = current_time + timedelta(days=3)
 
     await user_properties_collection.insert_one(
         {
             "property_id": property_id,
             "line_user_id": line_user_id,
-            "created_at": current_time,
-            "updated_at": current_time,
+            "first_succeeded_at": current_time,
+            "last_succeeded_at": current_time,
+            "last_aggregated_at": current_time,
+            "next_aggregated_at": next_time,
         }
     )
     logger.info(f"User property added: {property_id} for {line_user_id}")
@@ -333,6 +337,9 @@ async def handle_property_status(
     logger.info(f"Property status: {property_status}")
 
     if not property_status.user_has_access and property_status.exists:
+        logger.info(
+            f"Property already exists, adding user property: {property_status.property_id} for {line_user_id}"
+        )
         await add_user_property(property_status.property_id, line_user_id, collections)
     else:
         await handle_new_property(url, line_user_id)
