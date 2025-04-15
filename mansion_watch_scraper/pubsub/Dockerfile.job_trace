@@ -1,0 +1,49 @@
+# Use amd64 platform for Cloud Run compatibility
+FROM --platform=linux/amd64 python:3.11.7-slim AS builder
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+  build-essential \
+  python3-dev \
+  && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements first to leverage Docker cache
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy necessary files
+COPY mansion_watch_scraper/pubsub/job_trace.py /app/mansion_watch_scraper/pubsub/
+COPY mansion_watch_scraper/pubsub/job_trace_server.py /app/mansion_watch_scraper/pubsub/
+COPY app/configs /app/app/configs/
+COPY app/services /app/app/services/
+COPY app/models /app/app/models/
+COPY .env.prod /app/.env
+COPY service-account.json /app/service-account.json
+
+# Create a new stage for the final image
+FROM --platform=linux/amd64 python:3.11.7-slim
+
+WORKDIR /app
+
+# Copy installed packages and application files from builder
+COPY --from=builder /usr/local/lib/python3.11/site-packages/ /usr/local/lib/python3.11/site-packages/
+COPY --from=builder /app /app
+
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+ENV GRPC_DNS_RESOLVER=native
+ENV GCP_PROJECT_ID=daring-night-451212-a8
+ENV MONGO_URI=mongodb+srv://mansionwatch:mansiondaisuki@mansionwatch.mbt6a.mongodb.net/?retryWrites=true&w=majority&appName=MansionWatch
+ENV MONGO_DATABASE=mansion_watch
+ENV COLLECTION_JOB_TRACES=job_traces
+ENV JOB_TRACE_PORT=8081
+
+# Add proper signal handling
+STOPSIGNAL SIGTERM
+
+# Run the job trace server
+CMD ["python", "-m", "mansion_watch_scraper.pubsub.job_trace_server"] 
