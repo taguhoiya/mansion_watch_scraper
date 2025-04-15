@@ -301,6 +301,37 @@ class PubSubService:
             data = message.data
         return message_id, data
 
+    def _extract_property_name(self, property_info: Any) -> str:
+        """Extract property name from property_info object safely.
+
+        Args:
+            property_info: Property info object which could be a dict or model
+        Returns:
+            Property name or "unknown" if not found
+        """
+        try:
+            # Check various possible structures
+            if isinstance(property_info, dict):
+                # Dictionary with properties key
+                if "properties" in property_info and isinstance(
+                    property_info["properties"], dict
+                ):
+                    return property_info["properties"].get("name", "unknown")
+                # Dictionary with direct name key
+                elif "name" in property_info:
+                    return property_info["name"]
+            # Pydantic model with properties attribute
+            elif hasattr(property_info, "properties"):
+                if hasattr(property_info.properties, "name"):
+                    return property_info.properties.name
+            # Pydantic model with direct name attribute
+            elif hasattr(property_info, "name"):
+                return property_info.name
+        except Exception as e:
+            logger.warning(f"Error extracting property name: {str(e)}")
+
+        return "unknown"
+
     def _handle_spider_results(self, results: Dict[str, Any], url: str) -> None:
         """Handle and log spider execution results."""
         status = results.get("status", "unknown")
@@ -313,25 +344,9 @@ class PubSubService:
         elif status == "success":
             property_info = results.get("property_info", {})
             processing_status = results.get("status", "unknown")
-            # Handle property_info being either a dictionary or a Pydantic model
-            if hasattr(property_info, "__getitem__") and callable(
-                getattr(property_info, "get", None)
-            ):
-                # It's a dictionary
-                property_name = property_info.get("properties", {}).get(
-                    "name", "unknown"
-                )
-            elif hasattr(property_info, "properties") and hasattr(
-                property_info.properties, "name"
-            ):
-                # It's a Pydantic model with nested properties attribute
-                property_name = property_info.properties.name
-            elif hasattr(property_info, "name"):
-                # It's a Pydantic model with direct name attribute
-                property_name = property_info.name
-            else:
-                # Fallback
-                property_name = "unknown"
+
+            # Extract property name using helper method
+            property_name = self._extract_property_name(property_info)
 
             if processing_status == "stored":
                 logger.info(f"Successfully stored property: {property_name} ({url})")
