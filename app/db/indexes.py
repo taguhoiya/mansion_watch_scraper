@@ -37,9 +37,20 @@ USER_PROPERTY_INDEXES = [
     IndexModel([("created_at", DESCENDING)]),
 ]
 
+MESSAGE_INDEXES = [
+    # Primary lookup index - must be unique
+    IndexModel([("message_id", ASCENDING)], unique=True),
+    # Index for finding messages by LINE user ID and status
+    IndexModel([("line_user_id", ASCENDING), ("status", ASCENDING)]),
+    # Index for sorting by creation and update times
+    IndexModel([("created_at", DESCENDING)]),
+    IndexModel([("updated_at", DESCENDING)]),
+]
+
 COLLECTION_INDEXES = {
     "properties": PROPERTY_INDEXES,
     "user_properties": USER_PROPERTY_INDEXES,
+    "messages": MESSAGE_INDEXES,
 }
 
 

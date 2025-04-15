@@ -17,7 +17,9 @@ from scrapy.crawler import CrawlerProcess
 from scrapy.utils.project import get_project_settings
 
 from app.configs.settings import LOGGING_CONFIG
+from app.models.job_status import JobStatus, JobType
 from app.services.dates import get_current_time
+from mansion_watch_scraper.pubsub.job_trace import create_job_trace, update_job_status
 from mansion_watch_scraper.spiders.suumo_scraper import MansionWatchSpider
 
 # Set multiprocessing start method to 'spawn' to avoid gRPC fork issues
@@ -462,9 +464,20 @@ class PubSubService:
 
     def _process_message(self, message_data: MessageData, message_id: str) -> None:
         """Process a single message based on its type."""
-        if not message_data.url:
-            self._process_batch(message_data, message_id)
-        else:
+        # Create job trace record
+        if message_data.url:
+            # For URL-specific requests
+            create_job_trace(
+                message_id=message_id,
+                job_type=JobType.PROPERTY_SCRAPE,
+                url=message_data.url,
+                line_user_id=message_data.line_user_id,
+                check_only=message_data.check_only,
+            )
+
+            # Update status to processing
+            update_job_status(message_id, JobStatus.PROCESSING)
+
             logger.info(
                 f"Running spider for URL: {message_data.url}",
                 extra={
@@ -474,12 +487,71 @@ class PubSubService:
                     "line_user_id": message_data.line_user_id,
                 },
             )
-            results = self.run_spider(
-                url=message_data.url,
+
+            try:
+                results = self.run_spider(
+                    url=message_data.url,
+                    line_user_id=message_data.line_user_id,
+                    check_only=message_data.check_only,
+                )
+
+                # Update job status based on results
+                if results.get("status") == "success":
+                    update_job_status(message_id, JobStatus.SUCCESS, result=results)
+                elif results.get("status") == "not_found":
+                    update_job_status(message_id, JobStatus.NOT_FOUND)
+                else:
+                    error_msg = results.get("error_message", "Unknown error")
+                    update_job_status(message_id, JobStatus.FAILED, error=error_msg)
+
+                self._handle_spider_results(results, message_data.url)
+
+            except Exception as e:
+                logger.error(
+                    f"Error processing URL {message_data.url}: {str(e)}",
+                    extra={
+                        "operation": "process_message_error",
+                        "error": str(e),
+                        "error_type": e.__class__.__name__,
+                        "message_id": message_id,
+                        "url": message_data.url,
+                    },
+                    exc_info=True,
+                )
+                update_job_status(
+                    message_id, JobStatus.FAILED, error=f"Exception: {str(e)}"
+                )
+        else:
+            # For batch requests
+            create_job_trace(
+                message_id=message_id,
+                job_type=JobType.BATCH_CHECK,
                 line_user_id=message_data.line_user_id,
                 check_only=message_data.check_only,
             )
-            self._handle_spider_results(results, message_data.url)
+
+            # Update status to processing
+            update_job_status(message_id, JobStatus.PROCESSING)
+
+            try:
+                self._process_batch(message_data, message_id)
+                update_job_status(message_id, JobStatus.SUCCESS)
+            except Exception as e:
+                logger.error(
+                    f"Error processing batch: {str(e)}",
+                    extra={
+                        "operation": "process_batch_error",
+                        "error": str(e),
+                        "error_type": e.__class__.__name__,
+                        "message_id": message_id,
+                    },
+                    exc_info=True,
+                )
+                update_job_status(
+                    message_id,
+                    JobStatus.FAILED,
+                    error=f"Batch processing exception: {str(e)}",
+                )
 
     def message_callback(self, message: Dict[str, Any]) -> None:
         """Process a Pub/Sub push message.
@@ -496,75 +568,115 @@ class PubSubService:
                     "subscription": string
                 }
         """
+        message_id = "unknown"
         try:
             with self._lock:
-                if len(self._processed_messages) > 1000:
-                    self._processed_messages.clear()
-
                 # Extract message details from Cloud Run push structure
                 pubsub_message = message.get("message")
                 if not pubsub_message:
                     raise ValueError("Invalid Pub/Sub message: missing 'message' field")
 
                 message_id = pubsub_message.get("messageId", "unknown")
-                publish_time = pubsub_message.get("publishTime")
-                subscription = message.get("subscription", "unknown")
 
-                # Check if we've already processed this message
-                if message_id in self._processed_messages:
-                    logger.info(
-                        "Message already processed, skipping",
-                        extra={
-                            "operation": "message_deduplication",
-                            "message_id": message_id,
-                            "subscription": subscription,
-                        },
-                    )
+                if self._should_skip_message(message_id, message):
                     return
-
-                logger.info(
-                    "Processing Pub/Sub message",
-                    extra={
-                        "operation": "message_processing",
-                        "message_id": message_id,
-                        "publish_time": publish_time,
-                        "subscription": subscription,
-                    },
-                )
-
-                # Mark as processed
-                self._processed_messages.add(message_id)
 
                 # Decode and process message data
                 message_data = self._decode_message_data(pubsub_message, message_id)
                 self._process_message(message_data, message_id)
 
         except ValueError as e:
-            # Log validation errors
-            logger.error(
-                "Invalid message format",
-                extra={
-                    "operation": "message_validation_error",
-                    "error": str(e),
-                    "error_type": "ValueError",
-                    "message_id": message_id if "message_id" in locals() else "unknown",
-                },
-                exc_info=True,
-            )
+            self._handle_validation_error(message_id, e)
             raise
+
         except Exception as e:
-            # Log processing errors
-            logger.error(
-                "Error processing message",
-                extra={
-                    "operation": "message_processing_error",
-                    "message_id": message_id if "message_id" in locals() else "unknown",
-                    "error": str(e),
-                    "error_type": e.__class__.__name__,
-                },
-                exc_info=True,
-            )
+            self._handle_processing_error(message_id, e)
             raise
+
+    def _should_skip_message(self, message_id: str, message: Dict[str, Any]) -> bool:
+        """Check if we should skip processing this message."""
+        # Clean up processed messages list if it gets too large
+        if len(self._processed_messages) > 1000:
+            self._processed_messages.clear()
+
+        # Get subscription information for logging
+        pubsub_message = message.get("message", {})
+        publish_time = pubsub_message.get("publishTime")
+        subscription = message.get("subscription", "unknown")
+
+        # Check if we've already processed this message
+        if message_id in self._processed_messages:
+            logger.info(
+                "Message already processed, skipping",
+                extra={
+                    "operation": "message_deduplication",
+                    "message_id": message_id,
+                    "subscription": subscription,
+                },
+            )
+            return True
+
+        logger.info(
+            "Processing Pub/Sub message",
+            extra={
+                "operation": "message_processing",
+                "message_id": message_id,
+                "publish_time": publish_time,
+                "subscription": subscription,
+            },
+        )
+
+        # Mark as processed
+        self._processed_messages.add(message_id)
+        return False
+
+    def _handle_validation_error(self, message_id: str, error: Exception) -> None:
+        """Handle message validation errors."""
+        logger.error(
+            "Invalid message format",
+            extra={
+                "operation": "message_validation_error",
+                "error": str(error),
+                "error_type": "ValueError",
+                "message_id": message_id,
+            },
+            exc_info=True,
+        )
+        # Create job trace for failed validation
+        try:
+            create_job_trace(
+                message_id=message_id,
+                job_type=JobType.PROPERTY_SCRAPE,
+            )
+            update_job_status(
+                message_id, JobStatus.FAILED, error=f"Validation error: {str(error)}"
+            )
+        except Exception:
+            pass  # Ignore errors in error handling
+
+    def _handle_processing_error(self, message_id: str, error: Exception) -> None:
+        """Handle message processing errors."""
+        logger.error(
+            "Error processing message",
+            extra={
+                "operation": "message_processing_error",
+                "message_id": message_id,
+                "error": str(error),
+                "error_type": error.__class__.__name__,
+            },
+            exc_info=True,
+        )
+        # Create job trace for failed processing
+        try:
+            create_job_trace(
+                message_id=message_id,
+                job_type=JobType.PROPERTY_SCRAPE,
+            )
+            update_job_status(
+                message_id, JobStatus.FAILED, error=f"Processing error: {str(error)}"
+            )
+        except Exception:
+            pass  # Ignore errors in error handling
 
 
 def _run_spider_process(

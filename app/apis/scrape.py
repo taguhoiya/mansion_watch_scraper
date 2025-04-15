@@ -8,6 +8,9 @@ from fastapi import APIRouter, HTTPException, status
 from google.cloud import pubsub_v1
 from pydantic import BaseModel, field_validator
 
+from app.models.job_status import JobType
+from mansion_watch_scraper.pubsub.job_trace import create_job_trace
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -125,6 +128,16 @@ async def queue_scraping(request: ScrapeRequest) -> Dict[str, str]:
         future.add_done_callback(get_callback(future, message_id))
 
         logger.info(f"Published message {message_id} for URL: {request.url}")
+
+        # Create job trace record
+        create_job_trace(
+            message_id=message_id,
+            job_type=JobType.PROPERTY_SCRAPE,
+            url=request.url,
+            line_user_id=request.line_user_id,
+            check_only=request.check_only,
+        )
+
         return {
             "status": "queued",
             "message": "Scraping request has been queued",
