@@ -191,6 +191,88 @@ class MansionWatchSpider(scrapy.Spider):
         }
         return None
 
+    def _extract_all_data(self, response, property_name, property_id, current_time):
+        """Extract all data types from the response and yield them.
+
+        Args:
+            response: Scrapy response object
+            property_name: Name of the property
+            property_id: ID of the property
+            current_time: Current timestamp
+
+        Yields:
+            Dict containing each data type under its collection name key
+        Raises:
+            ValueError: If property information extraction fails
+        """
+        # Extract property information
+        property_info = self._extract_property_info(response)
+        if not property_info:
+            self.error("Failed to extract property information", operation="parse")
+            raise ValueError("Failed to extract property information")
+
+        # Extract image URLs
+        image_urls = self._extract_image_urls(response)
+        if not image_urls and not self.check_only:
+            self.warning(
+                f"No image URLs found for property: {property_name}",
+                operation="image_extraction",
+            )
+
+        # 1. Create property item
+        property_item = {
+            "properties": property_info,
+            "image_urls": image_urls,
+            "line_user_id": self.line_user_id,
+            "check_only": self.check_only,
+            "property_id": property_id,
+        }
+
+        # 2. Create user property item
+        user_property_item = {
+            "user_properties": {
+                "line_user_id": self.line_user_id,
+                "property_id": property_id,
+            },
+        }
+
+        # 3. Extract and yield property overview
+        try:
+            property_overview = self._extract_property_overview(
+                response, property_name, current_time, property_id
+            )
+            if property_overview:
+                property_overview_item = {
+                    "property_overviews": property_overview,
+                }
+        except Exception as e:
+            self.error(
+                f"Failed to extract property overview: {str(e)}",
+                operation="property_overview_extraction",
+            )
+
+        # 4. Extract and yield common overview
+        try:
+            common_overview = self._extract_common_overview(
+                response, current_time, property_id
+            )
+            if common_overview:
+                common_overview_item = {
+                    "common_overviews": common_overview,
+                }
+        except Exception as e:
+            self.error(
+                f"Failed to extract common overview: {str(e)}",
+                operation="common_overview_extraction",
+            )
+
+        yield {
+            **property_item,
+            **user_property_item,
+            **property_overview_item,
+            **common_overview_item,
+        }
+
     def parse(self, response):
         """Parse the response and handle any HTTP errors."""
         self.log(
@@ -213,44 +295,32 @@ class MansionWatchSpider(scrapy.Spider):
 
             # Create a new property document
             property_id = ObjectId()
+            current_time = get_current_time()
 
-            # Extract property information
-            property_info = self._extract_property_info(response)
-            if not property_info:
-                self.error("Failed to extract property information", operation="parse")
-                self.results = {
-                    "status": "error",
-                    "error_type": "extraction_failed",
-                    "error_message": "Failed to extract property information",
-                    "url": response.url,
-                }
-                return
+            # Extract and yield all data types
+            first_item = None
+            for item in self._extract_all_data(
+                response, property_name, property_id, current_time
+            ):
+                if first_item is None and "properties" in item:
+                    first_item = item
+                yield item
 
-            # Extract image URLs
-            image_urls = self._extract_image_urls(response)
-            if not image_urls and not self.check_only:
-                self.warning(
-                    f"No image URLs found for property: {property_name}",
-                    operation="image_extraction",
-                )
-
-            # Create property item
-            property_item = {
-                "properties": property_info,
-                "image_urls": image_urls,
-                "line_user_id": self.line_user_id,
-                "check_only": self.check_only,
-                "property_id": property_id,
-            }
-
+            # Set results for status reporting
             self.results = {
                 "status": "success",
-                "property_info": property_item,
+                "property_info": first_item["properties"] if first_item else None,
             }
             self.has_results = True
 
-            yield property_item
-
+        except ValueError as e:
+            self.results = {
+                "status": "error",
+                "error_type": "extraction_failed",
+                "error_message": str(e),
+                "url": response.url,
+            }
+            return
         except Exception as e:
             self.error(
                 f"Error parsing response: {str(e)}",
