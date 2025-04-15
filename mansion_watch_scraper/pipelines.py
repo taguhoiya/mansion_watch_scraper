@@ -174,14 +174,16 @@ def process_property(
 
     property_dict = convert_to_dict(item[PROPERTIES], "properties")
 
-    # Log the incoming property data
+    # Log the incoming property data using structured logging for GCP
     logger.info(
         "Processing property",
         extra={
-            "property_name": property_dict.get("name"),
-            "url": property_dict.get("url"),
-            "redirected_url": property_dict.get("redirected_url"),
-            "is_active": property_dict.get("is_active"),
+            "json_fields": {
+                "property_name": property_dict.get("name"),
+                "url": property_dict.get("url"),
+                "redirected_url": property_dict.get("redirected_url"),
+                "is_active": property_dict.get("is_active", True),
+            }
         },
     )
 
@@ -472,7 +474,19 @@ class MongoPipeline:
 
     def open_spider(self, spider):
         """Initialize MongoDB connection when spider opens."""
-        self.logger.info("Opening MongoDB connection")
+        self.logger.info(
+            "Opening MongoDB connection",
+            extra={
+                "json_fields": {
+                    "mongo_uri": (
+                        self.mongo_uri.split("@")[-1]
+                        if "@" in self.mongo_uri
+                        else "masked"
+                    ),
+                    "mongo_db": self.mongo_db,
+                }
+            },
+        )
         self.client = pymongo.MongoClient(self.mongo_uri, server_api=ServerApi("1"))
         self.db = self.client[self.mongo_db]
 
@@ -480,7 +494,10 @@ class MongoPipeline:
         """Close MongoDB connection when spider closes."""
         if self.client:
             self.client.close()
-        self.logger.info("Completed MongoPipeline")
+        self.logger.info(
+            "Completed MongoPipeline",
+            extra={"json_fields": {"spider_name": spider.name}},
+        )
 
     def process_item(self, item: ItemType, spider) -> ItemType:
         """Process items and store them in MongoDB."""
@@ -501,7 +518,26 @@ class MongoPipeline:
 
             return item
         except Exception as e:
-            self.logger.error(f"Error processing item: {e}")
+            self.logger.error(
+                f"Error processing item: {e}",
+                extra={
+                    "json_fields": {
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "item_collections": [
+                            k
+                            for k in item.keys()
+                            if k
+                            in [
+                                PROPERTIES,
+                                USER_PROPERTIES,
+                                PROPERTY_OVERVIEWS,
+                                COMMON_OVERVIEWS,
+                            ]
+                        ],
+                    }
+                },
+            )
             raise DropItem(f"Failed to process item: {e}")
 
 
@@ -701,25 +737,90 @@ class SuumoImagesPipeline(ImagesPipeline):
         """Upload an image to Google Cloud Storage."""
         return self._upload_to_gcs(image_path, original_url)
 
+    def _get_property_name(self, item: Dict[str, Any]) -> str:
+        """Extract property name from item."""
+        properties = item.get("properties", {})
+        if isinstance(properties, Property):
+            return properties.name
+        elif isinstance(properties, dict):
+            return properties.get("name", "Unknown")
+        return "Unknown"
+
+    def _process_existing_image(
+        self, request: Request, blob_name: str
+    ) -> Optional[str]:
+        """Handle image that already exists in storage."""
+        gcs_url = f"https://storage.googleapis.com/{self.bucket_name}/{blob_name}"
+        self.logger.debug(f"Image already exists in GCS: {blob_name}")
+        # Cache the URL for future use
+        self.image_url_to_gcs_url[request.url] = gcs_url
+        return gcs_url
+
+    def _process_new_image(self, request: Request, blob_name: str) -> Optional[str]:
+        """Download and upload a new image."""
+        self.logger.debug(f"Downloading image from: {request.url}")
+        image_path = self._process_single_request(request)
+        if not image_path:
+            self.logger.error(f"Failed to process image: {request.url}")
+            return None
+
+        self.logger.debug(f"Uploading image to GCS: {blob_name}")
+        gcs_url = self._upload_to_gcs(image_path, request.url)
+        if not gcs_url:
+            self.logger.error(f"Failed to upload image to GCS: {request.url}")
+            return None
+
+        # Cache the URL for future use
+        self.image_url_to_gcs_url[request.url] = gcs_url
+        self.logger.debug(f"Successfully uploaded image to: {gcs_url}")
+        return gcs_url
+
+    def _update_item_image_urls(
+        self, item: Dict[str, Any], processed_urls: List[str]
+    ) -> None:
+        """Update item with processed image URLs."""
+        if not processed_urls:
+            return
+
+        item["image_urls"] = processed_urls
+        properties = item.get("properties")
+        if isinstance(properties, Property):
+            properties.image_urls = processed_urls
+        elif properties is not None:
+            item["properties"]["image_urls"] = processed_urls
+
     def process_item(self, item: Dict[str, Any], spider) -> Dict[str, Any]:
         """Process each item and handle image downloads."""
         image_urls = item.get("image_urls", [])
         if not image_urls:
-            self.logger.warning("No image URLs found in item")
+            self.logger.warning(
+                "No image URLs found in item",
+                extra={"json_fields": {"item_keys": list(item.keys())}},
+            )
             return item
 
         requests = self.get_media_requests(item, spider)
         if not requests:
-            self.logger.warning("No media requests generated for item")
+            self.logger.warning(
+                "No media requests generated for item",
+                extra={"json_fields": {"image_urls": image_urls}},
+            )
             return item
 
         processed_urls = []
         existing_images = 0
         new_uploads = 0
         failed_uploads = 0
+        property_name = self._get_property_name(item)
 
         self.logger.info(
-            f"Starting to process {len(requests)} images for property: {item.get('properties', {}).get('name', 'Unknown')}"
+            f"Starting to process {len(requests)} images for property: {property_name}",
+            extra={
+                "json_fields": {
+                    "property_name": property_name,
+                    "image_count": len(requests),
+                }
+            },
         )
 
         for i, request in enumerate(requests, 1):
@@ -728,51 +829,38 @@ class SuumoImagesPipeline(ImagesPipeline):
 
             # Check if image already exists in GCS
             if check_blob_exists(self.bucket, blob_name):
-                gcs_url = (
-                    f"https://storage.googleapis.com/{self.bucket_name}/{blob_name}"
-                )
-                self.logger.debug(f"Image already exists in GCS: {blob_name}")
+                gcs_url = self._process_existing_image(request, blob_name)
                 processed_urls.append(gcs_url)
-                # Cache the URL for future use
-                self.image_url_to_gcs_url[request.url] = gcs_url
                 existing_images += 1
                 continue
 
-            self.logger.debug(f"Downloading image from: {request.url}")
-            image_path = self._process_single_request(request)
-            if not image_path:
-                self.logger.error(f"Failed to process image: {request.url}")
+            # Process new image
+            gcs_url = self._process_new_image(request, blob_name)
+            if gcs_url:
+                processed_urls.append(gcs_url)
+                new_uploads += 1
+            else:
                 failed_uploads += 1
-                continue
-
-            self.logger.debug(f"Uploading image to GCS: {blob_name}")
-            gcs_url = self._upload_to_gcs(image_path, request.url)
-            if not gcs_url:
-                self.logger.error(f"Failed to upload image to GCS: {request.url}")
-                failed_uploads += 1
-                continue
-
-            processed_urls.append(gcs_url)
-            # Cache the URL for future use
-            self.image_url_to_gcs_url[request.url] = gcs_url
-            new_uploads += 1
-            self.logger.debug(f"Successfully uploaded image to: {gcs_url}")
 
         # Log summary of processed images
         total_images = len(requests)
         self.logger.info(
-            f"Image processing summary for {item.get('properties', {}).get('name', 'Unknown')}: "
+            f"Image processing summary for {property_name}: "
             f"Total: {total_images}, Existing: {existing_images}, "
-            f"New uploads: {new_uploads}, Failed: {failed_uploads}"
+            f"New uploads: {new_uploads}, Failed: {failed_uploads}",
+            extra={
+                "json_fields": {
+                    "property_name": property_name,
+                    "total_images": total_images,
+                    "existing_images": existing_images,
+                    "new_uploads": new_uploads,
+                    "failed_uploads": failed_uploads,
+                }
+            },
         )
 
-        if processed_urls:
-            item["image_urls"] = processed_urls
-            properties = item.get("properties")
-            if isinstance(properties, Property):
-                properties.image_urls = processed_urls
-            elif properties is not None:
-                item["properties"]["image_urls"] = processed_urls
+        # Update item with processed URLs
+        self._update_item_image_urls(item, processed_urls)
 
         return item
 
@@ -829,7 +917,7 @@ class SuumoImagesPipeline(ImagesPipeline):
         gcs_urls = []
         for download in successful_downloads:
             if "path" in download:
-                url = self._upload_image_to_gcs(download["path"])
+                url = self._upload_image_to_gcs(download["path"], download["url"])
                 if url:
                     gcs_urls.append(url)
                     # Cache the mapping between original URL and GCS URL
