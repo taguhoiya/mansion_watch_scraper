@@ -313,7 +313,25 @@ class PubSubService:
         elif status == "success":
             property_info = results.get("property_info", {})
             processing_status = results.get("status", "unknown")
-            property_name = property_info.get("properties", {}).get("name", "unknown")
+            # Handle property_info being either a dictionary or a Pydantic model
+            if hasattr(property_info, "__getitem__") and callable(
+                getattr(property_info, "get", None)
+            ):
+                # It's a dictionary
+                property_name = property_info.get("properties", {}).get(
+                    "name", "unknown"
+                )
+            elif hasattr(property_info, "properties") and hasattr(
+                property_info.properties, "name"
+            ):
+                # It's a Pydantic model with nested properties attribute
+                property_name = property_info.properties.name
+            elif hasattr(property_info, "name"):
+                # It's a Pydantic model with direct name attribute
+                property_name = property_info.name
+            else:
+                # Fallback
+                property_name = "unknown"
 
             if processing_status == "stored":
                 logger.info(f"Successfully stored property: {property_name} ({url})")
