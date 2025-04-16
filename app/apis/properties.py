@@ -136,7 +136,7 @@ async def get_property_by_id(property_id: str):
         db = get_db()
         coll_prop = db[collection_properties]
         coll_prop_ov = db[collection_property_overviews]
-        coll_prop_commom_ov = db[collection_common_overviews]
+        coll_prop_common_ov = db[collection_common_overviews]
 
         # Query with ObjectId but convert to string in response
         prop: Property = await coll_prop.find_one({"_id": obj_id})
@@ -147,7 +147,7 @@ async def get_property_by_id(property_id: str):
         if not prop_ov:
             raise HTTPException(status_code=404, detail="Property overview not found")
 
-        common_ov: CommonOverview = await coll_prop_commom_ov.find_one(
+        common_ov: CommonOverview = await coll_prop_common_ov.find_one(
             {"property_id": obj_id}
         )
         if not common_ov:
