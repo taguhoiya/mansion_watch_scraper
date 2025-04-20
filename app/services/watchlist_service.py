@@ -70,7 +70,18 @@ class WatchlistService:
 
             property_ids = [prop["property_id"] for prop in user_props]
             properties = await self._get_properties(property_ids)
-            return await self._enrich_properties(properties)
+
+            # Create a mapping of property_id to property data
+            property_map = {str(prop["_id"]): prop for prop in properties}
+
+            # Maintain order from user_props while enriching properties
+            ordered_properties = []
+            for user_prop in user_props:
+                prop_id = str(user_prop["property_id"])
+                if prop_id in property_map:
+                    ordered_properties.append(property_map[prop_id])
+
+            return await self._enrich_properties(ordered_properties)
 
         except HTTPException:
             raise
@@ -106,9 +117,11 @@ class WatchlistService:
             HTTPException: If there's an error fetching the properties.
         """
         try:
-            return await self.coll_user_props.find(
-                {"line_user_id": line_user_id}
-            ).to_list(length=None)
+            return (
+                await self.coll_user_props.find({"line_user_id": line_user_id})
+                .sort("first_succeeded_at", -1)
+                .to_list(length=None)
+            )
         except Exception as e:
             logger.error("Error fetching user properties: %s", str(e))
             raise
